@@ -30,7 +30,8 @@ def build(bld):
         'penn-search/penn-search-message.cc',
         'penn-search/penn-search-helper.cc',
         'penn-search/grader-logs.cc',
-        'neighbor/neighbor-table.cc'
+        'neighbor/neighbor-table.cc',
+	'neighbor/neighbor-timers.cc'
         ]
     module.use.append("OPENSSL")
     headers = bld(features='ns3header')
@@ -57,7 +58,8 @@ def build(bld):
         'penn-search/penn-search-helper.h',
         'penn-search/penn-key-helper.h',
         'penn-search/grader-logs.h',
-        'neighbor/neighbor-table.h'
+        'neighbor/neighbor-table.h',
+	'neighbor/neighbor-timers.h'
         ]
 
     # bld.ns3_python_bindings()
