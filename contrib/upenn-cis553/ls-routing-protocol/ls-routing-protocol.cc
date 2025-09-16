@@ -343,17 +343,24 @@ void LSRoutingProtocol::DumpLSA()
   PRINT_LOG("");
 }
 
-void LSRoutingProtocol::DumpNeighbors()
-{
+void LSRoutingProtocol::DumpNeighbors() {
   STATUS_LOG(std::endl
              << "**************** Neighbor List ********************" << std::endl
              << "NeighborNumber\t\tNeighborAddr\t\tInterfaceAddr");
-  PRINT_LOG("");
 
-  /* NOTE: For purpose of autograding, you should invoke the following function for each
-  neighbor table entry. The output format is indicated by parameter name and type.
-  */
-  //  checkNeighborTableEntry();
+  std::vector<NeighborTableEntry> neighbors = m_neighbors.Snapshot();
+  STATUS_LOG("Number of neighbors: " << neighbors.size());
+  for (const auto& entry : neighbors) {
+    STATUS_LOG(ReverseLookup(entry.neighborAddress) << "\t\t\t"
+               << entry.neighborAddress << "\t\t"
+               << entry.interfaceAddress);
+    
+    // checkNeighborTableEntry(node number, neighbor IP address, interface IP address);
+    checkNeighborTableEntry(ReverseLookup(entry.neighborAddress), entry.neighborAddress, entry.interfaceAddress);
+
+    
+  }
+  STATUS_LOG("**************** END OF LIST ********************");
 }
 
 void LSRoutingProtocol::DumpRoutingTable()
@@ -572,24 +579,4 @@ void LSRoutingProtocol::RecvHelloMessage(LSMessage lsMessage, Ipv4Address localI
 void LSRoutingProtocol::AuditNeighbors() {
   m_neighbors.Audit();
   DEBUG_LOG("Audited neighbor table on " << m_mainAddress << ". Current size: " << m_neighbors.Size());
-}
-
-void LSRoutingProtocol::DumpNeighbors() {
-  STATUS_LOG(std::endl
-             << "**************** Neighbor List ********************" << std::endl
-             << "NeighborNumber\t\tNeighborAddr\t\tInterfaceAddr");
-
-  std::vector<NeighborTableEntry> neighbors = m_neighbors.Snapshot();
-  STATUS_LOG("Number of neighbors: " << neighbors.size());
-  for (const auto& entry : neighbors) {
-    STATUS_LOG(ReverseLookup(entry.neighborAddress) << "\t\t\t"
-               << entry.neighborAddress << "\t\t"
-               << entry.interfaceAddress);
-    
-    // checkNeighborTableEntry(node number, neighbor IP address, interface IP address);
-    checkNeighborTableEntry(ReverseLookup(entry.neighborAddress), entry.neighborAddress, entry.interfaceAddress);
-
-    
-  }
-  STATUS_LOG("**************** END OF LIST ********************");
 }

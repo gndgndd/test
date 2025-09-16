@@ -34,6 +34,9 @@
 #include <vector>
 #include <map>
 
+#include "ns3/neighbor-table.h"
+#include "ns3/neighbor-timers.h"
+
 using namespace ns3;
 
 class DVRoutingProtocol : public PennRoutingProtocol
@@ -92,6 +95,7 @@ public:
 
   // Periodic Audit
   void AuditPings();
+  void AuditHellos();
 
   // From Ipv4RoutingProtocol
 
@@ -217,6 +221,10 @@ private:
   void DumpNeighbors();
   void DumpRoutingTable();
 
+  // Neighbor Discovery Helper Functions
+  void ProcessHelloReq(DVMessage dvMessage);
+  void ProcessHelloRsp(DVMessage dvMessage, Ipv4Address localInterfaceAddress);
+
 protected:
   virtual void DoInitialize(void);
   uint32_t GetNextSequenceNumber();
@@ -243,6 +251,9 @@ private:
   Timer m_auditPingsTimer;
   // Ping tracker
   std::map<uint32_t, Ptr<PingRequest>> m_pingTracker;
+  // Milestone 1: Neighbor table and Neighbor timers
+  NeighborTable m_neighbors;
+  Ptr<NeighborTimers> m_neighborTimers;
 };
 
 #endif

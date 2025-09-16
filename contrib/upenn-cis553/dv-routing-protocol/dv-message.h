@@ -37,7 +37,9 @@ class DVMessage : public Header
       {
         PING_REQ = 1,
         PING_RSP = 2,
-        // Define extra message types when needed       
+        // Define extra message types when needed
+        HELLO_REQ,    // New type for neighbor discovery HELLO messages
+        HELLO_RSP     // New type for HELLO reply messages       
       };
 
     DVMessage (DVMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
@@ -105,6 +107,26 @@ class DVMessage : public Header
     void Serialize (Buffer::Iterator start) const;
     uint32_t Deserialize (Buffer::Iterator start);
 
+    struct HelloReq
+      {
+        void Print (std::ostream &os) const;
+        uint32_t GetSerializedSize (void) const;
+        void Serialize (Buffer::Iterator &start) const;
+        uint32_t Deserialize (Buffer::Iterator &start);
+        // Payload
+        std::string helloMessage;
+      };
+
+    struct HelloRsp
+      {
+        void Print (std::ostream &os) const;
+        uint32_t GetSerializedSize (void) const;
+        void Serialize (Buffer::Iterator &start) const;
+        uint32_t Deserialize (Buffer::Iterator &start);
+        // Payload
+        Ipv4Address sourceAddress; // The address of the node sending the reply
+        std::string helloMessage;
+      };
     
     struct PingReq
       {
@@ -134,9 +156,32 @@ class DVMessage : public Header
       {
         PingReq pingReq;
         PingRsp pingRsp;
+        HelloReq helloReq;   // New member for HELLO_REQ messages
+        HelloRsp helloRsp;   // New member for HELLO_RSP messages
       } m_message;
     
   public:
+      /**
+     * \returns Hello Struct
+     */
+    HelloReq GetHelloReq();
+  
+    /**
+     * \brief Sets Hello message params
+     */
+    void SetHelloReq(std::string helloMessage);
+  
+    /**
+     * \returns HelloRsp Struct
+     */
+    HelloRsp GetHelloRsp();
+    
+    /**
+     * \brief Sets HelloRsp message params
+     * \param senderAddress The address of the node sending the reply
+     */
+    void SetHelloRsp(Ipv4Address sourceAddress, std::string helloMessage);
+
     /**
      *  \returns PingReq Struct
      */
