@@ -193,7 +193,15 @@ void LSRoutingProtocol::DoInitialize()
 
   if (canRunLS)
   {
-    AuditPings();
+    // Configure and start NeighborTimers
+    m_neighborTimers = CreateObject<NeighborTimers>();
+    m_neighborTimers->Configure(Seconds(1.0), Seconds(1.0));
+    m_neighborTimers->SetHelloCallback(MakeCallback(&LSRoutingProtocol::SendHello, this));
+    m_neighborTimers->SetAuditCallback(MakeCallback(&LSRoutingProtocol::AuditNeighbors, this));
+    m_neighborTimers->Start();
+
+    
+    //AuditPings();
     NS_LOG_DEBUG("Starting LS on node " << m_mainAddress);
   }
 }
@@ -399,6 +407,14 @@ void LSRoutingProtocol::RecvLSMessage(Ptr<Socket> socket)
   case LSMessage::PING_RSP:
     ProcessPingRsp(lsMessage);
     break;
+    
+  case LSMessage::HELLO: // New case for HELLO message
+    RecvHelloMessage(lsMessage, interface);
+    break;
+  case LSMessage::HELLO_RSP: // New case for HELLO_RSP message
+    RecvHelloMessage(lsMessage, interface);
+    break;
+  
   default:
     ERROR_LOG("Unknown Message Type!");
     break;
@@ -516,4 +532,65 @@ void LSRoutingProtocol::SetIpv4(Ptr<Ipv4> ipv4)
   m_auditPingsTimer.SetFunction(&LSRoutingProtocol::AuditPings, this);
   m_ipv4 = ipv4;
   m_staticRouting->SetIpv4(m_ipv4);
+}
+
+// New functions
+
+void LSRoutingProtocol::SendHello() {
+  Ptr<Packet> packet = Create<Packet>();
+  LSMessage lsMessage = LSMessage(LSMessage::HELLO, 0, 1, m_mainAddress);
+  lsMessage.SetHello(); // No payload to set
+  packet->AddHeader(lsMessage);
+  BroadcastPacket(packet);
+  DEBUG_LOG("Broadcasting HELLO message from " << m_mainAddress);
+}
+
+void LSRoutingProtocol::RecvHelloMessage(LSMessage lsMessage, Ipv4Address localInterfaceAddress) {
+  Ipv4Address originatorAddress = lsMessage.GetOriginatorAddress();
+  m_neighbors.ObserveHello(originatorAddress, localInterfaceAddress);
+
+  if (lsMessage.GetMessageType() == LSMessage::HELLO) {
+    DEBUG_LOG("Received HELLO from " << originatorAddress << " on interface " << localInterfaceAddress);
+    // Send a HELLO_RSP back to the originator
+    Ptr<Packet> packet = Create<Packet>();
+    LSMessage lsResponse = LSMessage(LSMessage::HELLO_RSP, 0, 1, m_mainAddress);
+    lsResponse.SetHelloRsp(originatorAddress);
+    packet->AddHeader(lsResponse);
+
+    for (std::map<Ptr<Socket>, Ipv4InterfaceAddress>::const_iterator i = m_socketAddresses.begin();
+         i != m_socketAddresses.end(); i++) {
+      if (i->second.GetLocal() == localInterfaceAddress) {
+        i->first->SendTo(packet, 0, InetSocketAddress(originatorAddress, LS_PORT_NUMBER));
+        DEBUG_LOG("Sent HELLO_RSP to " << originatorAddress << " from interface " << localInterfaceAddress);
+        break;
+      }
+    }
+  } else {
+    DEBUG_LOG("Received HELLO_RSP from " << originatorAddress << " on interface " << localInterfaceAddress);
+  }
+}
+
+void LSRoutingProtocol::AuditNeighbors() {
+  m_neighbors.Audit();
+  DEBUG_LOG("Audited neighbor table on " << m_mainAddress << ". Current size: " << m_neighbors.Size());
+}
+
+void LSRoutingProtocol::DumpNeighbors() {
+  STATUS_LOG(std::endl
+             << "**************** Neighbor List ********************" << std::endl
+             << "NeighborNumber\t\tNeighborAddr\t\tInterfaceAddr");
+
+  std::vector<NeighborTableEntry> neighbors = m_neighbors.Snapshot();
+  STATUS_LOG("Number of neighbors: " << neighbors.size());
+  for (const auto& entry : neighbors) {
+    STATUS_LOG(ReverseLookup(entry.neighborAddress) << "\t\t\t"
+               << entry.neighborAddress << "\t\t"
+               << entry.interfaceAddress);
+    
+    // checkNeighborTableEntry(node number, neighbor IP address, interface IP address);
+    checkNeighborTableEntry(ReverseLookup(entry.neighborAddress), entry.neighborAddress, entry.interfaceAddress);
+
+    
+  }
+  STATUS_LOG("**************** END OF LIST ********************");
 }
