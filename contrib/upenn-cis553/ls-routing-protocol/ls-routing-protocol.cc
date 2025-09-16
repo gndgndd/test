@@ -386,17 +386,10 @@ void LSRoutingProtocol::RecvLSMessage(Ptr<Socket> socket)
     NS_ABORT_MSG("No incoming interface on LS message, aborting.");
   }
 
-  Ipv4Address interface;
-  uint32_t idx = 1;
-  for (std::map<Ptr<Socket>, Ipv4InterfaceAddress>::iterator iter = m_socketAddresses.begin();
-       iter != m_socketAddresses.end(); iter++)
+  Ipv4Address interface = Ipv4Address::GetAny();
+  if (incomingIf < m_ipv4->GetNInterfaces())
   {
-    if (idx == incomingIf)
-    {
-      interface = iter->second.GetLocal(); // find the incoming interface
-      break;
-    }
-    idx++;
+    interface = m_ipv4->GetAddress(incomingIf, 0).GetLocal();
   }
 
   switch (lsMessage.GetMessageType())
