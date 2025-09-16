@@ -545,30 +545,36 @@ void LSRoutingProtocol::SendHello() {
   DEBUG_LOG("Broadcasting HELLO message from " << m_mainAddress);
 }
 
-void LSRoutingProtocol::RecvHelloMessage(LSMessage lsMessage, Ipv4Address localInterfaceAddress) {
+void LSRoutingProtocol::RecvHelloMessage(LSMessage lsMessage, Ipv4Address localInterfaceAddress)
+{
   Ipv4Address originatorAddress = lsMessage.GetOriginatorAddress();
   m_neighbors.ObserveHello(originatorAddress, localInterfaceAddress);
 
-  if (lsMessage.GetMessageType() == LSMessage::HELLO) {
+  if (lsMessage.GetMessageType() == LSMessage::HELLO)
+  {
     DEBUG_LOG("Received HELLO from " << originatorAddress << " on interface " << localInterfaceAddress);
-    // Send a HELLO_RSP back to the originator
+
     Ptr<Packet> packet = Create<Packet>();
-    LSMessage lsResponse = LSMessage(LSMessage::HELLO_RSP, 0, 1, m_mainAddress);
-    lsResponse.SetHelloRsp(originatorAddress);
+    LSMessage lsResponse(LSMessage::HELLO_RSP, 0, 1, m_mainAddress);
+    lsResponse.SetHelloRsp(m_mainAddress);
     packet->AddHeader(lsResponse);
 
-    for (std::map<Ptr<Socket>, Ipv4InterfaceAddress>::const_iterator i = m_socketAddresses.begin();
-         i != m_socketAddresses.end(); i++) {
-      if (i->second.GetLocal() == localInterfaceAddress) {
-        i->first->SendTo(packet, 0, InetSocketAddress(originatorAddress, LS_PORT_NUMBER));
+    for (const auto& kv : m_socketAddresses)
+    {
+      if (kv.second.GetLocal() == localInterfaceAddress)
+      {
+        kv.first->SendTo(packet, 0, InetSocketAddress(originatorAddress, LS_PORT_NUMBER));
         DEBUG_LOG("Sent HELLO_RSP to " << originatorAddress << " from interface " << localInterfaceAddress);
         break;
       }
     }
-  } else {
+  }
+  else
+  {
     DEBUG_LOG("Received HELLO_RSP from " << originatorAddress << " on interface " << localInterfaceAddress);
   }
 }
+
 
 void LSRoutingProtocol::AuditNeighbors() {
   m_neighbors.Audit();
