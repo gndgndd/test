@@ -31,6 +31,9 @@
 #include "ns3/penn-routing-protocol.h"
 #include "ns3/ping-request.h"
 
+#include "ns3/neighbor-table.h"   // added this header
+#include "ns3/neighbor-timers.h"  // added this header
+
 #include <map>
 #include <vector>
 
@@ -229,6 +232,11 @@ private:
   void DumpNeighbors();
   void DumpRoutingTable();
 
+  // Neighbor Discovery Helper Functions
+  void RecvHelloMessage(LSMessage lsMessage, Ipv4Address localInterfaceAddress);
+  void SendHello();
+  void AuditNeighbors();
+
 protected:
   virtual void DoInitialize(void);
   uint32_t GetNextSequenceNumber();
@@ -253,6 +261,10 @@ private:
   uint32_t m_currentSequenceNumber;
   std::map<uint32_t, Ipv4Address> m_nodeAddressMap;
   std::map<Ipv4Address, uint32_t> m_addressNodeMap;
+
+  // New members for Milestone 1 Neighbor Manager
+  Ptr<NeighborTimers> m_neighborTimers;
+  NeighborTable m_neighbors;
 
   // Timers
   Timer m_auditPingsTimer;
