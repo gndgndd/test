@@ -61,6 +61,14 @@ LSMessage::GetSerializedSize (void) const
     case PING_RSP:
       size += m_message.pingRsp.GetSerializedSize ();
       break;
+
+    case HELLO: // new case for Hello
+      size += m_message.hello.GetSerializedSize ();
+      break;
+    case HELLO_RSP: // new case for Hello_RSP
+      size += m_message.helloRsp.GetSerializedSize ();
+      break;
+      
     default:
       NS_ASSERT (false);
     }
@@ -85,6 +93,12 @@ LSMessage::Print (std::ostream &os) const
     case PING_RSP:
       m_message.pingRsp.Print (os);
       break;
+    case HELLO: // new case for Hello
+      m_message.hello.Print(os);
+      break;
+    case HELLO_RSP: // new case for Hello_RSP
+      m_message.helloRsp.Print(os);
+      break;     
     default:
       break;
     }
@@ -108,6 +122,14 @@ LSMessage::Serialize (Buffer::Iterator start) const
     case PING_RSP:
       m_message.pingRsp.Serialize (i);
       break;
+
+    case HELLO: // new case for Hello
+      m_message.hello.Serialize(i);
+      break;
+    case HELLO_RSP: // new case for Hello_RSP
+      m_message.helloRsp.Serialize(i);
+      break;
+      
     default:
       NS_ASSERT (false);
     }
@@ -133,6 +155,14 @@ LSMessage::Deserialize (Buffer::Iterator start)
     case PING_RSP:
       size += m_message.pingRsp.Deserialize (i);
       break;
+
+    case HELLO: // new case for Hello
+      size += m_message.hello.Deserialize(i);
+      break;
+    case HELLO_RSP: // new case for Hello_RSP
+      size += m_message.helloRsp.Deserialize(i);
+      break;
+     
     default:
       NS_ASSERT (false);
     }
@@ -254,6 +284,86 @@ LSMessage::GetPingRsp ()
 }
 
 // TODO: You can put your own Rsp/Req related function here
+
+// HELLO
+
+uint32_t
+LSMessage::Hello::GetSerializedSize (void) const
+{
+  return 0; // No payload
+}
+
+void
+LSMessage::Hello::Print (std::ostream &os) const
+{
+  os << "Hello:: Message: no payload" << "\n";
+}
+
+void
+LSMessage::Hello::Serialize (Buffer::Iterator &start) const
+{
+  // No payload to serialize
+}
+
+uint32_t
+LSMessage::Hello::Deserialize (Buffer::Iterator &start)
+{
+  return 0; // No payload to deserialize
+}
+
+
+// Hello_RSP
+
+uint32_t
+LSMessage::HelloRsp::GetSerializedSize (void) const
+{
+  return IPV4_ADDRESS_SIZE; // Only the sender's IP address
+}
+
+void
+LSMessage::HelloRsp::Print (std::ostream &os) const
+{
+  os << "HelloRsp:: Sender Address: " << senderAddress << "\n";
+}
+
+void
+LSMessage::HelloRsp::Serialize (Buffer::Iterator &start) const
+{
+  start.WriteHtonU32 (senderAddress.Get ());
+}
+
+uint32_t
+LSMessage::HelloRsp::Deserialize (Buffer::Iterator &start)
+{
+  senderAddress = Ipv4Address (start.ReadNtohU32 ());
+  return HelloRsp::GetSerializedSize ();
+}
+
+void
+LSMessage::SetHello ()
+{
+  m_messageType = HELLO;
+}
+
+LSMessage::Hello
+LSMessage::GetHello ()
+{
+  return m_message.hello;
+}
+
+void
+LSMessage::SetHelloRsp (Ipv4Address senderAddress)
+{
+  m_messageType = HELLO_RSP;
+  m_message.helloRsp.senderAddress = senderAddress;
+}
+
+LSMessage::HelloRsp
+LSMessage::GetHelloRsp ()
+{
+  return m_message.helloRsp;
+}
+
 
 void
 LSMessage::SetMessageType (MessageType messageType)
