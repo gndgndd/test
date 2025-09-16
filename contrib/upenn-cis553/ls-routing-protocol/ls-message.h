@@ -38,6 +38,8 @@ class LSMessage : public Header
       {
       PING_REQ,
       PING_RSP,
+      HELLO,    // New type for neighbor discovery HELLO messages
+      HELLO_RSP // New type for HELLO reply messages
       };
 
     LSMessage(LSMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
@@ -127,14 +129,57 @@ class LSMessage : public Header
       std::string pingMessage;
       };
 
+    struct Hello
+      {
+      void Print(std::ostream& os) const;
+      uint32_t GetSerializedSize(void) const;
+      void Serialize(Buffer::Iterator& start) const;
+      uint32_t Deserialize(Buffer::Iterator& start);
+      };
+    
+    struct HelloRsp
+      {
+      void Print(std::ostream& os) const;
+      uint32_t GetSerializedSize(void) const;
+      void Serialize(Buffer::Iterator& start) const;
+      uint32_t Deserialize(Buffer::Iterator& start);
+      // Payload
+      Ipv4Address senderAddress; // The address of the node sending the reply
+      };
+
   private:
     struct
       {
       PingReq pingReq;
       PingRsp pingRsp;
+      Hello hello;         // New member for HELLO messages
+      HelloRsp helloRsp;   // New member for HELLO_RSP messages
       } m_message;
 
   public:
+
+public:
+    /**
+     * \returns Hello Struct
+     */
+    Hello GetHello();
+  
+    /**
+     * \brief Sets Hello message params
+     */
+    void SetHello();
+  
+    /**
+     * \returns HelloRsp Struct
+     */
+    HelloRsp GetHelloRsp();
+    
+    /**
+     * \brief Sets HelloRsp message params
+     * \param senderAddress The address of the node sending the reply
+     */
+    void SetHelloRsp(Ipv4Address senderAddress);
+
     /**
      *  \returns PingReq Struct
      */
