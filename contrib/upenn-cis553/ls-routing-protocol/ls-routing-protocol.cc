@@ -203,6 +203,10 @@ void LSRoutingProtocol::DoInitialize()
   }
 }
 
+void LSRoutingProtocol::PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit unit) const
+{
+  // You can ignore this function
+}
 
 Ptr<Ipv4Route>
 LSRoutingProtocol::RouteOutput(Ptr<Packet> packet, const Ipv4Header &header, Ptr<NetDevice> outInterface,
@@ -425,6 +429,7 @@ void LSRoutingProtocol::ProcessHelloReq(LSMessage incoming)
 
 void LSRoutingProtocol::ProcessPingRsp(LSMessage msg)
 {
+  // Ignore responses not addressed to us
   if (!IsOwnAddress(msg.GetPingRsp().destinationAddress))
   {
     return;
