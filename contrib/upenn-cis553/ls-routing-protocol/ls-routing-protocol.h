@@ -78,6 +78,7 @@ public:
    *
    * \param addressNodeMap Mapping.
    */
+
   virtual void SetAddressNodeMap(std::map<Ipv4Address, uint32_t> addressNodeMap);
 
   // Message Handling
@@ -86,29 +87,33 @@ public:
    *
    * \param socket Socket on which data is received.
    */
+
   void RecvLSMessage(Ptr<Socket> socket);
   void ProcessPingReq(LSMessage lsMessage);
   void ProcessPingRsp(LSMessage lsMessage);
-
-  //[DONE]: TODO add definitions for outlined processing functions for hello req, res and 
-  //a broadcast for hello
-  //process the hello request message
+  //*******************MS-1*******************//
   void ProcessHelloReq(LSMessage lsMessage);
-
-  //process response message, should accept an interface address
   void ProcessHelloRsp(LSMessage lsMessage, Ipv4Address interfaceAd);
-
-  //broadcaster function to surrounding neighbors
   void BroadcastHello();
 
   // Periodic Audit
   void AuditPings();
-
-  //[DONE]: function to audit the neighborhood
+   //*******************MS-1*******************//
   void AuditNeighbors();
 
-  //TODO: need to add definitions for ls advert, processing, flooding and the algorithm
-  //TODO: also, need a structure to manage information about the node neighbors
+  //*******************MS-2*******************//
+  void LSAdvertise();
+  void ProcessLsp(LSMessage lsMessage, Ipv4Address interfaceAd );
+  void floodLSA(Ptr<Packet> packet, Ipv4Address fromNode);
+  void Dijkstra();
+
+  struct NeighborInfo
+  {
+  uint32_t neighborNodeNum;
+  //Time t_stamp;
+  uint32_t linkwt;
+  };
+  // From Ipv4RoutingProtocol
 
   /**
    * \brief Print the Routing Table entries
@@ -234,15 +239,20 @@ private:
    * Useful when printing out debugging messages etc.
    *
    * \param ipv4Address IP address of node.
-   */  
-   virtual std::string ReverseLookup(Ipv4Address ipv4Address);
+   */
+  virtual std::string ReverseLookup(Ipv4Address ipv4Address);
 
   // Status
+  void DumpLSA();
   void DumpNeighbors();
+  void DumpRoutingTable();
 
 protected:
   virtual void DoInitialize(void);
   uint32_t GetNextSequenceNumber();
+
+  typedef std::vector<std::pair<uint32_t, uint32_t>> neighborInfo;
+    
 
   /**
    * \brief Check whether the specified IP is owned by this node.
@@ -259,7 +269,7 @@ private:
   Ptr<Ipv4> m_ipv4;
 
   Time m_pingTimeout;
-  Time m_neighborTimeout; //add timeout for neighbor
+  Time m_neighborTimeout;
   uint8_t m_maxTTL;
   uint16_t m_lsPort;
   uint32_t m_currentSequenceNumber;
@@ -273,18 +283,36 @@ private:
   // Ping tracker
   std::map<uint32_t, Ptr<PingRequest>> m_pingTracker;
 
-  //[DONE]: TODO: create structs to populate the neighbor table 
-  struct NeighborTableEntry {
-    Ipv4Address neighborAddr;
-    Ipv4Address interfaceAddr;
-    Time t_stamp;
-    uint32_t nodeNumber;
+  struct NeighborTableEntry
+  {
+  //uint32_t nodeNumber;
+  Ipv4Address neighborAddr;
+  Ipv4Address interfaceAddr;
+  Time t_stamp;
+  uint32_t linkwt;
+  };
+  
+ struct LSPneighbors{
+  Ipv4Address interfaceAd;
+  uint32_t seqNumber;
+  std::vector <std::pair<uint32_t, uint32_t>> neighbornodeandCost;
   };
 
-   // Neighbor table
-  std::map<uint32_t, NeighborTableEntry> m_neighbors; // Neighbor table
+  struct RoutingTableEntry
+  {
+  Ipv4Address destAddr;
+  uint32_t nextHopNum;
+  Ipv4Address nextHopAddr;
+  Ipv4Address interfaceAddr;
+  uint32_t cost;
+  };
+
+  std::map<uint32_t, NeighborTableEntry> m_neighbors;
+
+// originator node, sequence number and neighbor info
+  std::map<uint32_t, LSPneighbors> m_validLSP;
+
+  std::map<uint32_t, RoutingTableEntry> m_routingTable;
+
 };
-
 #endif
-
-//~ resolve buggy push
