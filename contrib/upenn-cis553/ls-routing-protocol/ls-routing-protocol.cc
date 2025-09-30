@@ -13,7 +13,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-
+#include "ns3/ls-routing-protocol.h"
 #include "ns3/ls-routing-protocol.h"
 #include "ns3/double.h"
 #include "ns3/inet-socket-address.h"
@@ -28,6 +28,9 @@
 #include "ns3/udp-socket-factory.h"
 #include "ns3/uinteger.h"
 #include <ctime>
+#include <iostream>
+#include <string>
+#include <unistd.h>
 
 using namespace ns3;
 
@@ -39,6 +42,8 @@ NS_OBJECT_ENSURE_REGISTERED(LSRoutingProtocol);
 /// Maximum allowed sequence number
 #define LS_MAX_SEQUENCE_NUMBER 0xFFFF
 #define LS_PORT_NUMBER 698
+
+Timer m_auditNeighborsTimer;
 
 TypeId
 LSRoutingProtocol::GetTypeId(void)
@@ -56,9 +61,9 @@ LSRoutingProtocol::GetTypeId(void)
 }
 
 LSRoutingProtocol::LSRoutingProtocol()
-    : m_auditPingsTimer(Timer::CANCEL_ON_DESTROY)
+    : m_auditPingsTimer(Timer::CANCEL_ON_DESTROY),
+      m_auditNeighborsTimer(Timer::CANCEL_ON_DESTROY)
 {
-
   m_currentSequenceNumber = 0;
   // Setup static routing
   m_staticRouting = Create<Ipv4StaticRouting>();
@@ -88,6 +93,7 @@ void LSRoutingProtocol::DoDispose()
   // Cancel timers
   m_auditPingsTimer.Cancel();
   m_pingTracker.clear();
+  m_auditNeighborsTimer.Cancel();
 
   PennRoutingProtocol::DoDispose();
 }
@@ -134,7 +140,6 @@ LSRoutingProtocol::ReverseLookup(Ipv4Address ipAddress)
 
 void LSRoutingProtocol::DoInitialize()
 {
-
   if (m_mainAddress == Ipv4Address())
   {
     Ipv4Address loopback("127.0.0.1");
@@ -193,23 +198,11 @@ void LSRoutingProtocol::DoInitialize()
 
   if (canRunLS)
   {
-    // Configure and start NeighborTimers
-    m_neighborTimers = CreateObject<NeighborTimers>();
-    m_neighborTimers->Configure(Seconds(1.0), Seconds(1.0));
-    m_neighborTimers->SetHelloCallback(MakeCallback(&LSRoutingProtocol::SendHello, this));
-    m_neighborTimers->SetAuditCallback(MakeCallback(&LSRoutingProtocol::AuditNeighbors, this));
-    m_neighborTimers->Start();
-
-    
-    //AuditPings();
+    AuditNeighbors();
     NS_LOG_DEBUG("Starting LS on node " << m_mainAddress);
   }
 }
 
-void LSRoutingProtocol::PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit unit) const
-{
-  // You can ignore this function
-}
 
 Ptr<Ipv4Route>
 LSRoutingProtocol::RouteOutput(Ptr<Packet> packet, const Ipv4Header &header, Ptr<NetDevice> outInterface,
@@ -320,62 +313,30 @@ void LSRoutingProtocol::ProcessCommand(std::vector<std::string> tokens)
     }
     iterator++;
     std::string table = *iterator;
-    if (table == "ROUTES" || table == "ROUTING")
-    {
-      DumpRoutingTable();
-    }
-    else if (table == "NEIGHBORS" || table == "neighborS")
+    if (table == "NEIGHBORS" || table == "neighborS")
     {
       DumpNeighbors();
-    }
-    else if (table == "LSA")
-    {
-      DumpLSA();
     }
   }
 }
 
-void LSRoutingProtocol::DumpLSA()
+void LSRoutingProtocol::DumpNeighbors()
 {
-  STATUS_LOG(std::endl
-             << "**************** LSA DUMP ********************" << std::endl
-             << "Node\t\tNeighbor(s)");
-  PRINT_LOG("");
-}
-
-void LSRoutingProtocol::DumpNeighbors() {
   STATUS_LOG(std::endl
              << "**************** Neighbor List ********************" << std::endl
              << "NeighborNumber\t\tNeighborAddr\t\tInterfaceAddr");
 
-  std::vector<NeighborTableEntry> neighbors = m_neighbors.Snapshot();
-  STATUS_LOG("Number of neighbors: " << neighbors.size());
-  for (const auto& entry : neighbors) {
-    STATUS_LOG(ReverseLookup(entry.neighborAddress) << "\t\t\t"
-               << entry.neighborAddress << "\t\t"
-               << entry.interfaceAddress);
-    
-    // checkNeighborTableEntry(node number, neighbor IP address, interface IP address);
-    checkNeighborTableEntry(ReverseLookup(entry.neighborAddress), entry.neighborAddress, entry.interfaceAddress);
+  PRINT_LOG(m_neighbors.size());
 
-    
+  for (auto itr = m_neighbors.begin(); itr != m_neighbors.end(); itr++)
+  {
+    uint32_t node_num = itr->first;
+    NeighborTableEntry entry = itr->second;
+    checkNeighborTableEntry(node_num, entry.neighborAddr, entry.interfaceAddr);
+    PRINT_LOG(node_num << '\t' << entry.neighborAddr << '\t' << entry.interfaceAddr);
   }
-  STATUS_LOG("**************** END OF LIST ********************");
 }
 
-void LSRoutingProtocol::DumpRoutingTable()
-{
-  STATUS_LOG(std::endl
-             << "**************** Route Table ********************" << std::endl
-             << "DestNumber\t\tDestAddr\t\tNextHopNumber\t\tNextHopAddr\t\tInterfaceAddr\t\tCost");
-
-  PRINT_LOG("");
-
-  /* NOTE: For purpose of autograding, you should invoke the following function for each
-  routing table entry. The output format is indicated by parameter name and type.
-  */
-  //  checkNeighborTableEntry();
-}
 void LSRoutingProtocol::RecvLSMessage(Ptr<Socket> socket)
 {
   Address sourceAddr;
@@ -393,10 +354,17 @@ void LSRoutingProtocol::RecvLSMessage(Ptr<Socket> socket)
     NS_ABORT_MSG("No incoming interface on LS message, aborting.");
   }
 
-  Ipv4Address interface = Ipv4Address::GetAny();
-  if (incomingIf < m_ipv4->GetNInterfaces())
+  Ipv4Address interface;
+  uint32_t idx = 1;
+  for (std::map<Ptr<Socket>, Ipv4InterfaceAddress>::iterator iter = m_socketAddresses.begin();
+       iter != m_socketAddresses.end(); iter++)
   {
-    interface = m_ipv4->GetAddress(incomingIf, 0).GetLocal();
+    if (idx == incomingIf)
+    {
+      interface = iter->second.GetLocal(); // find the incoming interface
+      break;
+    }
+    idx++;
   }
 
   switch (lsMessage.GetMessageType())
@@ -407,14 +375,12 @@ void LSRoutingProtocol::RecvLSMessage(Ptr<Socket> socket)
   case LSMessage::PING_RSP:
     ProcessPingRsp(lsMessage);
     break;
-    
-  case LSMessage::HELLO: // New case for HELLO message
-    RecvHelloMessage(lsMessage, interface);
+  case LSMessage::HELLO_REQ:
+    ProcessHelloReq(lsMessage);
     break;
-  case LSMessage::HELLO_RSP: // New case for HELLO_RSP message
-    RecvHelloMessage(lsMessage, interface);
+  case LSMessage::HELLO_RSP:
+    ProcessHelloRsp(lsMessage, interface);
     break;
-  
   default:
     ERROR_LOG("Unknown Message Type!");
     break;
@@ -439,31 +405,127 @@ void LSRoutingProtocol::ProcessPingReq(LSMessage lsMessage)
   }
 }
 
-void LSRoutingProtocol::ProcessPingRsp(LSMessage lsMessage)
+void LSRoutingProtocol::ProcessHelloReq(LSMessage incoming)
 {
-  // Check destination address
-  if (IsOwnAddress(lsMessage.GetPingRsp().destinationAddress))
+  static const uint8_t kHelloTtl = 1;
+
+  Ptr<Packet> pkt = Create<Packet>();
+
+  LSMessage reply(LSMessage::HELLO_RSP,
+                  incoming.GetSequenceNumber(),   
+                  kHelloTtl,
+                  m_mainAddress);                 
+
+  reply.SetHelloRsp(incoming.GetOriginatorAddress(), "HELLO_REPLY");
+  pkt->AddHeader(reply);
+
+  BroadcastPacket(pkt);
+}
+
+
+void LSRoutingProtocol::ProcessPingRsp(LSMessage msg)
+{
+  if (!IsOwnAddress(msg.GetPingRsp().destinationAddress))
   {
-    // Remove from pingTracker
-    std::map<uint32_t, Ptr<PingRequest>>::iterator iter;
-    iter = m_pingTracker.find(lsMessage.GetSequenceNumber());
-    if (iter != m_pingTracker.end())
-    {
-      std::string fromNode = ReverseLookup(lsMessage.GetOriginatorAddress());
-      TRAFFIC_LOG("Received PING_RSP, From Node: " << fromNode
-                                                   << ", Message: " << lsMessage.GetPingRsp().pingMessage);
-      m_pingTracker.erase(iter);
-    }
-    else
-    {
-      DEBUG_LOG("Received invalid PING_RSP!");
-    }
+    return;
+  }
+
+  const uint32_t seq = msg.GetSequenceNumber();
+  auto it = m_pingTracker.find(seq);
+
+  if (it == m_pingTracker.end())
+  {
+    PRINT_LOG("Received invalid PING_RSP!");
+    return;
+  }
+
+  const std::string from = ReverseLookup(msg.GetOriginatorAddress());
+  TRAFFIC_LOG("Received PING_RSP, From Node: " << from
+                                               << ", Message: " << msg.GetPingRsp().pingMessage);
+
+  m_pingTracker.erase(it);
+}
+
+void LSRoutingProtocol::ProcessHelloRsp(LSMessage msg, Ipv4Address inIface)
+{
+  if (!IsOwnAddress(msg.GetHelloRsp().destinationAddress))
+  {
+    return;
+  }
+
+  uint32_t thisNodeId = 0;
+  {
+    std::string selfStr = ReverseLookup(msg.GetHelloRsp().destinationAddress);
+    std::istringstream ss(selfStr);
+    ss >> thisNodeId;
+  }
+
+  Ipv4Address neighborIp = msg.GetOriginatorAddress();
+  uint32_t neighborId = 0;
+  {
+    std::string neighStr = ReverseLookup(neighborIp);
+    std::istringstream ns(neighStr);
+    ns >> neighborId;
+  }
+
+  NeighborTableEntry entry;
+  entry.neighborAddr = neighborIp;
+  entry.interfaceAddr = inIface;
+  entry.t_stamp = Simulator::Now();
+
+  auto it = m_neighbors.find(neighborId);
+  if (it == m_neighbors.end())
+  {
+    m_neighbors[neighborId] = entry; 
+  }
+  else
+  {
+    it->second = entry; 
   }
 }
 
+
+void LSRoutingProtocol::AuditNeighbors()
+{
+  Time checkInterval = Seconds(5.0);
+  std::vector<uint32_t> toRemove;
+
+  for (const auto &pair : m_neighbors)
+  {
+    const NeighborTableEntry &nbr = pair.second;
+    if (Simulator::Now() - nbr.t_stamp >= checkInterval)
+    {
+      toRemove.push_back(pair.first);
+    }
+  }
+
+  for (uint32_t id : toRemove)
+  {
+    m_neighbors.erase(id);
+  }
+
+  BroadcastHello();
+  m_auditNeighborsTimer.Schedule(checkInterval);
+}
+
+
+void LSRoutingProtocol::BroadcastHello()
+{
+  const std::string msgContent = "HELLO";
+  uint32_t seqNum = GetNextSequenceNumber();
+
+  Ptr<Packet> packet = Create<Packet>();
+  LSMessage helloMsg(LSMessage::HELLO_REQ, seqNum, /*ttl*/ 1, m_mainAddress);
+
+  helloMsg.SetHelloReq(Ipv4Address::GetAny(), msgContent);
+  packet->AddHeader(helloMsg);
+
+  BroadcastPacket(packet);
+}
+
+
 bool LSRoutingProtocol::IsOwnAddress(Ipv4Address originatorAddress)
 {
-  // Check all interfaces
   for (std::map<Ptr<Socket>, Ipv4InterfaceAddress>::const_iterator i = m_socketAddresses.begin();
        i != m_socketAddresses.end(); i++)
   {
@@ -478,26 +540,29 @@ bool LSRoutingProtocol::IsOwnAddress(Ipv4Address originatorAddress)
 
 void LSRoutingProtocol::AuditPings()
 {
-  std::map<uint32_t, Ptr<PingRequest>>::iterator iter;
-  for (iter = m_pingTracker.begin(); iter != m_pingTracker.end();)
+  std::vector<uint32_t> expiredPings;
+  Time now = Simulator::Now();
+
+  for (const auto &kv : m_pingTracker)
   {
-    Ptr<PingRequest> pingRequest = iter->second;
-    if (pingRequest->GetTimestamp().GetMilliSeconds() + m_pingTimeout.GetMilliSeconds() <= Simulator::Now().GetMilliSeconds())
+    Ptr<PingRequest> req = kv.second;
+    if (now - req->GetTimestamp() >= m_pingTimeout)
     {
-      DEBUG_LOG("Ping expired. Message: " << pingRequest->GetPingMessage()
-                                          << " Timestamp: " << pingRequest->GetTimestamp().GetMilliSeconds()
-                                          << " CurrentTime: " << Simulator::Now().GetMilliSeconds());
-      // Remove stale entries
-      m_pingTracker.erase(iter++);
-    }
-    else
-    {
-      ++iter;
+      DEBUG_LOG("Removing expired PING. Msg=" << req->GetPingMessage()
+                                              << " SentAt=" << req->GetTimestamp().GetMilliSeconds()
+                                              << " Now=" << now.GetMilliSeconds());
+      expiredPings.push_back(kv.first);
     }
   }
-  // Rechedule timer
+
+  for (uint32_t seqNum : expiredPings)
+  {
+    m_pingTracker.erase(seqNum);
+  }
+
   m_auditPingsTimer.Schedule(m_pingTimeout);
 }
+
 
 uint32_t
 LSRoutingProtocol::GetNextSequenceNumber()
@@ -530,53 +595,9 @@ void LSRoutingProtocol::SetIpv4(Ptr<Ipv4> ipv4)
   NS_LOG_DEBUG("Created ls::RoutingProtocol");
   // Configure timers
   m_auditPingsTimer.SetFunction(&LSRoutingProtocol::AuditPings, this);
+  m_auditNeighborsTimer.SetFunction(&LSRoutingProtocol::AuditNeighbors, this);
   m_ipv4 = ipv4;
   m_staticRouting->SetIpv4(m_ipv4);
 }
 
-// New functions
 
-void LSRoutingProtocol::SendHello() {
-  Ptr<Packet> packet = Create<Packet>();
-  LSMessage lsMessage = LSMessage(LSMessage::HELLO, 0, 1, m_mainAddress);
-  lsMessage.SetHello(); // No payload to set
-  packet->AddHeader(lsMessage);
-  BroadcastPacket(packet);
-  DEBUG_LOG("Broadcasting HELLO message from " << m_mainAddress);
-}
-
-void LSRoutingProtocol::RecvHelloMessage(LSMessage lsMessage, Ipv4Address localInterfaceAddress)
-{
-  Ipv4Address originatorAddress = lsMessage.GetOriginatorAddress();
-  m_neighbors.ObserveHello(originatorAddress, localInterfaceAddress);
-
-  if (lsMessage.GetMessageType() == LSMessage::HELLO)
-  {
-    DEBUG_LOG("Received HELLO from " << originatorAddress << " on interface " << localInterfaceAddress);
-
-    Ptr<Packet> packet = Create<Packet>();
-    LSMessage lsResponse(LSMessage::HELLO_RSP, 0, 1, m_mainAddress);
-    lsResponse.SetHelloRsp(m_mainAddress);
-    packet->AddHeader(lsResponse);
-
-    for (const auto& kv : m_socketAddresses)
-    {
-      if (kv.second.GetLocal() == localInterfaceAddress)
-      {
-        kv.first->SendTo(packet, 0, InetSocketAddress(originatorAddress, LS_PORT_NUMBER));
-        DEBUG_LOG("Sent HELLO_RSP to " << originatorAddress << " from interface " << localInterfaceAddress);
-        break;
-      }
-    }
-  }
-  else
-  {
-    DEBUG_LOG("Received HELLO_RSP from " << originatorAddress << " on interface " << localInterfaceAddress);
-  }
-}
-
-
-void LSRoutingProtocol::AuditNeighbors() {
-  m_neighbors.Audit();
-  DEBUG_LOG("Audited neighbor table on " << m_mainAddress << ". Current size: " << m_neighbors.Size());
-}
