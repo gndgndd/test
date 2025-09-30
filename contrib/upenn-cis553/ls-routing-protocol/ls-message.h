@@ -234,4 +234,3 @@ operator<< (std::ostream& os, const LSMessage& message)
 
 #endif
 
-//~ resolve buggy push
