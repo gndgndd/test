@@ -33,13 +33,13 @@ class LSMessage : public Header
     LSMessage();
     virtual ~LSMessage();
 
-    // TODO: Define extra message types in enum when needed
+    //NEW: adding message types for the outgoing hello (req) and the hell0 ack (rsp)
     enum MessageType
       {
       PING_REQ,
       PING_RSP,
-      HELLO,    // New type for neighbor discovery HELLO messages
-      HELLO_RSP // New type for HELLO reply messages
+      HELLO_REQ,
+      HELLO_RSP
       };
 
     LSMessage(LSMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
@@ -107,7 +107,7 @@ class LSMessage : public Header
     void Serialize(Buffer::Iterator start) const;
     uint32_t Deserialize(Buffer::Iterator start);
 
-    struct PingReq
+  struct PingReq
       {
       void Print(std::ostream& os) const;
       uint32_t GetSerializedSize(void) const;
@@ -129,61 +129,66 @@ class LSMessage : public Header
       std::string pingMessage;
       };
 
-    struct Hello
-      {
+     //[DONE] TODO: add strucs for hello request
+    struct HelloReq
+    {
+      //printing, getting serialize size, serialize, deserialize
       void Print(std::ostream& os) const;
       uint32_t GetSerializedSize(void) const;
       void Serialize(Buffer::Iterator& start) const;
       uint32_t Deserialize(Buffer::Iterator& start);
-      };
-    
+
+      //going to address
+      Ipv4Address destinationAddress;
+
+      //whats being sent - unsure if added payload needed
+      std::string helloMessage;
+    };
+
+     //[DONE] TODO: add strucs for hello ack
     struct HelloRsp
-      {
+    {
+      //printing, getting serialize size, serialize, deserialize
       void Print(std::ostream& os) const;
       uint32_t GetSerializedSize(void) const;
       void Serialize(Buffer::Iterator& start) const;
       uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
-      Ipv4Address senderAddress; // The address of the node sending the reply
-      };
+      Ipv4Address sourceAddress;
+            //no additional payload
+
+      //going to address
+      Ipv4Address destinationAddress;
+
+      //whats being sent - unsure if added payload needed
+      std::string helloMessage;
+    };
+
+    //TODO: add a new neighborhood information dynamic arr (vector) where
+    //where we can add each element <int><int>
+
+    //TODO: struct with LSAdvertisement 
 
   private:
     struct
       {
       PingReq pingReq;
       PingRsp pingRsp;
-      Hello hello;         // New member for HELLO messages
-      HelloRsp helloRsp;   // New member for HELLO_RSP messages
+     //[DONE] TODO: Add the hello and hello ack message types to the struct
+      HelloReq helloReq;
+      HelloRsp helloRsp;
+      //TODO: add the the link state advert type
       } m_message;
 
   public:
-
-public:
-    /**
-     * \returns Hello Struct
-     */
-    Hello GetHello();
-  
-    /**
-     * \brief Sets Hello message params
-     */
-    void SetHello();
-  
-    /**
-     * \returns HelloRsp Struct
-     */
-    HelloRsp GetHelloRsp();
-    
-    /**
-     * \brief Sets HelloRsp message params
-     * \param senderAddress The address of the node sending the reply
-     */
-    void SetHelloRsp(Ipv4Address senderAddress);
-
     /**
      *  \returns PingReq Struct
      */
     PingReq GetPingReq();
+    //[DONE]: TODO: Add the new getter for the hello request  
+    HelloReq GetHelloReq();
+
+    //TODO: Add the new getter for the link state advert
+
 
     /**
      *  \brief Sets PingReq message params
@@ -191,6 +196,13 @@ public:
      */
 
     void SetPingReq(Ipv4Address destinationAddress, std::string message);
+
+
+    //[DONE] TODO: Add new setter for the Hello req 
+    void SetHelloReq(Ipv4Address destinationAddress, std::string message);
+
+    //TODO: Add new setter for the LS advert 
+
 
     /**
      * \returns PingRsp Struct
@@ -200,8 +212,18 @@ public:
      *  \brief Sets PingRsp message params
      *  \param message Payload String
      */
+
+     //DONE: TODO: Add new setter for the hello Response 
+      HelloRsp GetHelloRsp();
+
+
     void SetPingRsp(Ipv4Address destinationAddress, std::string message);
+
+    //DONE: TODO: Add new setter for the hello response
+    void SetHelloRsp(Ipv4Address destinationAddress, std::string message);
+
   }; // class LSMessage
+
 
 static inline std::ostream&
 operator<< (std::ostream& os, const LSMessage& message)
@@ -211,3 +233,5 @@ operator<< (std::ostream& os, const LSMessage& message)
   }
 
 #endif
+
+//~ resolve buggy push
