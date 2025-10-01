@@ -630,104 +630,97 @@ void LSRoutingProtocol::floodLSA(Ptr<Packet> packet, Ipv4Address fromNode)
 #include <map>
 #include <limits>
 
-void LSRoutingProtocol::Dijkstra()
-{ 
+void
+LSRoutingProtocol::Dijkstra()
+{
+  // Reset routes
   m_routingTable.clear();
-  std::vector<std::pair<uint32_t, std::pair<uint32_t, uint32_t>>> confirmed;  
-  std::vector<std::pair<uint32_t, std::pair<uint32_t, uint32_t>>> tentative;
 
-  std::string nodetoaddstr = ReverseLookup(m_mainAddress);
-  uint32_t nodetoadd;
-  std::istringstream sin(nodetoaddstr);
-  sin >> nodetoadd;
-
-  uint32_t cost_to_node = 0;
-  confirmed.push_back(make_pair(nodetoadd, std::make_pair(cost_to_node, nodetoadd)));
-  uint32_t prev_cost = cost_to_node;
-  if (m_neighbors.size() ==0){
+  if (m_neighbors.empty())
+  {
     return;
   }
-  while (1){
-  uint32_t nextNode = nodetoadd;   
-  uint32_t viaNode;
-  std::map<uint32_t, LSPneighbors>::iterator iter;
-  iter = m_validLSP.find(nextNode);
-  if (iter == m_validLSP.end())
- { return;}
-    LSPneighbors neighborInfoent = iter->second;
-    std::vector <std::pair<uint32_t, uint32_t>> neighborInfoentry = neighborInfoent.neighbornodeandCost;
- 
-    for (unsigned int i =0; i < neighborInfoentry.size(); i++){
-      uint32_t node_num = neighborInfoentry[i].first;
-      uint32_t cost = neighborInfoentry[i].second;
-      uint32_t new_cost = cost + prev_cost;
-      std::pair<uint32_t, std::pair<uint32_t, uint32_t>> p;
-      if (prev_cost == 0){
-         p =std::make_pair(node_num, std::make_pair(new_cost, node_num));
-      }
-      else
-      {p =std::make_pair(node_num, std::make_pair(new_cost, viaNode));}
 
-      bool notinConfirmed = true;
-      for (unsigned int k = 0; k <confirmed.size(); k++)
-      { if (confirmed[k].first == node_num){
-        notinConfirmed = false;
-        }
-      }
-      if (notinConfirmed) {     
-          unsigned int count  = 0;
-          for (unsigned int j =0; j < tentative.size(); j++){                        
-            uint32_t node_tentative = tentative[j].first;
-            uint32_t storedcost = tentative[j].second.first;
-            if (node_tentative == node_num)
-            {
-              count = count+1;
-              if (storedcost > new_cost){
-                tentative[j] = p;
-              }                
-            }
-          }
-          if (count == 0)
-          {
-            tentative.push_back(p);
-          }      
+  // Resolve this node’s ID
+  uint32_t srcId = 0;
+  {
+    std::istringstream ss(ReverseLookup(m_mainAddress));
+    ss >> srcId;
+  }
+
+  struct HeapEntry
+  {
+    uint32_t cost;
+    uint32_t node;
+    uint32_t firstHop; // first hop from src along the best-known path
+    bool operator<(const HeapEntry& other) const { return cost > other.cost; } // min-heap
+  };
+
+  std::map<uint32_t, uint32_t> dist;     // node -> cost
+  std::map<uint32_t, uint32_t> firstHop; // node -> first hop from src
+  std::set<uint32_t> done;               // finalized nodes
+  std::priority_queue<HeapEntry> pq;
+
+  dist[srcId] = 0;
+  firstHop[srcId] = srcId;
+  pq.push({0u, srcId, srcId});
+
+  while (!pq.empty())
+  {
+    HeapEntry top = pq.top();
+    pq.pop();
+
+    if (done.count(top.node)) continue;
+    if (dist[top.node] < top.cost) continue;
+
+    done.insert(top.node);
+
+    // Expand neighbors from LSP database
+    auto lspIt = m_validLSP.find(top.node);
+    if (lspIt == m_validLSP.end()) continue;
+
+    const auto& neighs = lspIt->second.neighbornodeandCost;
+    for (const auto& nc : neighs)
+    {
+      const uint32_t v = nc.first;
+      const uint32_t w = nc.second;
+
+      const uint32_t candidateFirstHop = (top.node == srcId ? v : top.firstHop);
+      const uint32_t newCost = top.cost + w;
+
+      auto dIt = dist.find(v);
+      if (dIt == dist.end() || newCost < dIt->second)
+      {
+        dist[v] = newCost;
+        firstHop[v] = candidateFirstHop;
+        pq.push({newCost, v, candidateFirstHop});
       }
     }
-  
+  }
 
-  if (tentative.empty()){break;}
-  uint32_t min_cost;
-  unsigned int index = 0;
-  min_cost = tentative[index].second.first;
-  for (unsigned int i =1; i < tentative.size(); i++){
-    if (tentative[i].second.first < min_cost){
-      index = i;
-      min_cost = tentative[index].second.first;
-    }   
-  }
-  std::pair<uint32_t, std::pair<uint32_t, uint32_t>> toConfirmed = tentative[index];
-  confirmed.push_back(toConfirmed);
-  tentative.erase(tentative.begin() + index);
-  nodetoadd = toConfirmed.first;
-  viaNode = toConfirmed.second.second;
-  prev_cost = toConfirmed.second.first;
-  
-  for (unsigned int i =1; i < confirmed.size(); i++){
-    uint32_t dest_node = confirmed[i].first;  
-    Ipv4Address dest_addr = ResolveNodeIpAddress(dest_node);
-    uint32_t next_hop = confirmed[i].second.second;
-    Ipv4Address next_hopAddr = ResolveNodeIpAddress(next_hop);
-    uint32_t cost = confirmed[i].second.first;
-    std::map<uint32_t, NeighborTableEntry>::iterator it;   
-    it = m_neighbors.find(next_hop);
+  // Build routing table
+  for (const auto& kv : dist)
+  {
+    const uint32_t destId = kv.first;
+    if (destId == srcId) continue;
 
-    Ipv4Address interAddr =  it->second.interfaceAddr;
-    RoutingTableEntry r = {dest_addr, next_hop, next_hopAddr, interAddr, cost};
-    m_routingTable.insert({dest_node, r});
+    const uint32_t cost     = kv.second;
+    const uint32_t hopId    = firstHop[destId];
+    const Ipv4Address destA = ResolveNodeIpAddress(destId);
+    const Ipv4Address hopA  = ResolveNodeIpAddress(hopId);
+
+    Ipv4Address outIface = Ipv4Address::GetAny();
+    auto nhIt = m_neighbors.find(hopId);
+    if (nhIt != m_neighbors.end())
+    {
+      outIface = nhIt->second.interfaceAddr;
+    }
+
+    RoutingTableEntry rte = {destA, hopId, hopA, outIface, cost};
+    m_routingTable[destId] = rte;
   }
-  }
-   
 }
+
 
 bool LSRoutingProtocol::IsOwnAddress(Ipv4Address originatorAddress)
 {
