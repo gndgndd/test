@@ -21,7 +21,9 @@
 #include "ns3/ipv4-address.h"
 #include "ns3/object.h"
 #include "ns3/packet.h"
-
+#include <vector>
+#include <utility>
+#include <string>
 
 using namespace ns3;
 
@@ -33,73 +35,35 @@ class LSMessage : public Header
     LSMessage();
     virtual ~LSMessage();
 
-    // TODO: Define extra message types in enum when needed
     enum MessageType
       {
       PING_REQ,
       PING_RSP,
-      HELLO_REQ,  // new
-      HELLO_RSP,  // new 
-      LSA_m,  //new
+      HELLO_REQ,
+      HELLO_RSP,
+      LSA_m,
       };
 
     LSMessage(LSMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
 
-    /**
-     *  \brief Sets message type
-     *  \param messageType message type
-     */
     void SetMessageType(MessageType messageType);
-
-    /**
-     *  \returns message type
-     */
     MessageType GetMessageType() const;
 
-    /**
-     *  \brief Sets Sequence Number
-     *  \param sequenceNumber Sequence Number of the request
-     */
     void SetSequenceNumber(uint32_t sequenceNumber);
-
-    /**
-     *  \returns Sequence Number
-     */
     uint32_t GetSequenceNumber() const;
 
-    /**
-     *  \brief Sets Originator IP Address
-     *  \param originatorAddress Originator IPV4 address
-     */
     void SetOriginatorAddress(Ipv4Address originatorAddress);
-
-    /**
-     *  \returns Originator IPV4 address
-     */
     Ipv4Address GetOriginatorAddress() const;
 
-    /**
-     *  \brief Sets Time To Live of the message
-     *  \param ttl TTL of the message
-     */
     void SetTTL(uint8_t ttl);
-
-    /**
-     *  \returns TTL of the message
-     */
     uint8_t GetTTL() const;
 
   private:
-    /**
-     *  \cond
-     */
     MessageType m_messageType;
     uint32_t m_sequenceNumber;
     Ipv4Address m_originatorAddress;
     uint8_t m_ttl;
-    /**
-     *  \endcond
-     */
+
   public:
     static TypeId GetTypeId(void);
     virtual TypeId GetInstanceTypeId(void) const;
@@ -108,13 +72,13 @@ class LSMessage : public Header
     void Serialize(Buffer::Iterator start) const;
     uint32_t Deserialize(Buffer::Iterator start);
 
+    // Ping Request and Response
     struct PingReq
       {
       void Print(std::ostream& os) const;
       uint32_t GetSerializedSize(void) const;
       void Serialize(Buffer::Iterator& start) const;
       uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
       Ipv4Address destinationAddress;
       std::string pingMessage;
       };
@@ -125,91 +89,67 @@ class LSMessage : public Header
       uint32_t GetSerializedSize(void) const;
       void Serialize(Buffer::Iterator& start) const;
       uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
       Ipv4Address destinationAddress;
       std::string pingMessage;
       };
-    //********************* new *********************//
+
+    // Hello Request and Response
     struct HelloReq
       {
       void Print(std::ostream& os) const;
       uint32_t GetSerializedSize(void) const;
       void Serialize(Buffer::Iterator& start) const;
       uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
       Ipv4Address destinationAddress;
       std::string helloMessage;
       };
-    //********************* new *********************//
+
     struct HelloRsp
       {
       void Print(std::ostream& os) const;
       uint32_t GetSerializedSize(void) const;
       void Serialize(Buffer::Iterator& start) const;
       uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
       Ipv4Address destinationAddress;
       std::string helloMessage;
       };
-   
     
-    typedef std::vector<std::pair<uint32_t, uint32_t>> neighborInfo;
-    
-
-    struct LsA
+    // Link State Advertisement (LSA) -- RENAME LSA STRUCT AND MEMBERS
+    struct Lsa
       {
       void Print(std::ostream& os) const;
       uint32_t GetSerializedSize(void) const;
       void Serialize(Buffer::Iterator& start) const;
       uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
-      //Ipv4Address destinationAddress;
-      neighborInfo lsaMessage;
+      // Payload - Renamed from lsaMessage
+      std::vector<std::pair<uint32_t, uint32_t>> linkVector;
       };
-
-   
 
   private:
     struct
       {
       PingReq pingReq;
       PingRsp pingRsp;
-      //******************* new ******************//
       HelloReq helloReq;
       HelloRsp helloRsp;
-      LsA lsA;
+      Lsa lsa; // RENAME UNION MEMBER
       } m_message;
-    
-
 
   public:
-    /**
-     *  \returns PingReq Struct
-     */
     PingReq GetPingReq();
-    //******************* new ******************//
     HelloReq GetHelloReq();
-    LsA GetLsA();
-    /**
-     *  \brief Sets PingReq message params
-     *  \param message Payload String
-     */
-
+    Lsa GetLsa(); // RENAME GETTER FUNCTION
+    
     void SetPingReq(Ipv4Address destinationAddress, std::string message);
-    void SetHelloReq(Ipv4Address destinationAddress, std::string message); //**** new ****//
-    void SetLsA (neighborInfo lsaMessage);
-    /**
-     * \returns PingRsp Struct
-     */
+    // RENAME SETTER FUNCTION AND USE CONST REFERENCE FOR EFFICIENCY
+    void SetLsa(const std::vector<std::pair<uint32_t, uint32_t>>& links);
+    void SetHelloReq(Ipv4Address destinationAddress, std::string message);
+    
     PingRsp GetPingRsp();
-    //******************* new ******************//
     HelloRsp GetHelloRsp();
-    /**
-     *  \brief Sets PingRsp message params
-     *  \param message Payload String
-     */
+    
     void SetPingRsp(Ipv4Address destinationAddress, std::string message);
-    void SetHelloRsp(Ipv4Address destinationAddress, std::string message); //**** new ****//
+    void SetHelloRsp(Ipv4Address destinationAddress, std::string message);
   }; // class LSMessage
 
 static inline std::ostream&
