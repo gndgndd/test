@@ -18,6 +18,8 @@
 #include <limits>
 #include <set>
 #include <sstream>
+#include <cctype>
+#include <algorithm>
 
 using namespace ns3;
 
@@ -149,7 +151,7 @@ LSRoutingProtocol::DoInitialize(void)
     NS_ASSERT(m_mainAddress != Ipv4Address());
   }
 
-  NS_LOG_DEBUG("LS start on " << m_mainAddress);
+  NS_LOG_DEBUG("[LS/BOOT] start on " << m_mainAddress);
 
   bool canRun = false;
 
@@ -191,7 +193,7 @@ LSRoutingProtocol::DoInitialize(void)
   {
     m_auditPingsTimer.Schedule(m_pingTimeout);
     m_updateTimer.Schedule(m_updateInterval);
-    NS_LOG_DEBUG("LS running on " << m_mainAddress);
+    NS_LOG_DEBUG("[LS/BOOT] running on " << m_mainAddress);
   }
 }
 
@@ -199,7 +201,7 @@ LSRoutingProtocol::DoInitialize(void)
 // Printing
 // ---------------------------------------------------------------------------
 void
-LSRoutingProtocol::PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit) const
+LSRoutingProtocol::PrintRoutingTable(Ptr<OutputStreamWrapper> /*stream*/, Time::Unit /*unit*/) const
 {
   // Not required by autograder.
 }
@@ -213,14 +215,14 @@ LSRoutingProtocol::RouteOutput(Ptr<Packet> packet, const Ipv4Header &header, Ptr
   Ptr<Ipv4Route> r = m_staticRouting->RouteOutput(packet, header, oif, sockerr);
   if (r)
   {
-    DEBUG_LOG("Route discovered to " << r->GetDestination()
+    DEBUG_LOG("[LS/ROUTE] to " << r->GetDestination()
               << " via " << r->GetGateway()
               << " src " << r->GetSource()
               << " out " << r->GetOutputDevice());
   }
   else
   {
-    DEBUG_LOG("No route to " << header.GetDestination());
+    DEBUG_LOG("[LS/ROUTE] none to " << header.GetDestination());
   }
   return r;
 }
@@ -254,8 +256,46 @@ LSRoutingProtocol::RouteInput(Ptr<const Packet> p, const Ipv4Header &header, Ptr
     return true;
   }
 
-  DEBUG_LOG("Drop: no route to " << dst);
+  DEBUG_LOG("[LS/ROUTE] drop: no route to " << dst);
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+static inline std::string
+ToLower(std::string s)
+{
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c){ return std::tolower(c); });
+  return s;
+}
+
+// Split tokens but preserve a quoted last argument for messages with spaces.
+// Example: PING 7 "hello world"
+static std::vector<std::string>
+NormalizeAndSplit(const std::vector<std::string>& tokens)
+{
+  if (tokens.empty()) return tokens;
+  // If the third token starts with a quote or there are >3 tokens, join [2..end)
+  if (tokens.size() >= 3)
+  {
+    std::string joined;
+    for (size_t i = 2; i < tokens.size(); ++i)
+    {
+      if (i > 2) joined.push_back(' ');
+      joined += tokens[i];
+    }
+    // Trim optional surrounding quotes
+    if (joined.size() >= 2 &&
+        ((joined.front() == '"'  && joined.back() == '"') ||
+         (joined.front() == '\'' && joined.back() == '\'')))
+    {
+      joined = joined.substr(1, joined.size() - 2);
+    }
+    return {tokens[0], tokens[1], joined};
+  }
+  return tokens;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,67 +304,91 @@ LSRoutingProtocol::RouteInput(Ptr<const Packet> p, const Ipv4Header &header, Ptr
 void
 LSRoutingProtocol::ProcessCommand(std::vector<std::string> tokens)
 {
-  auto it = tokens.begin();
-  std::string cmd = (it != tokens.end() ? *it : "");
-  if (cmd == "PING")
+  if (tokens.empty()) return;
+
+  // Normalize case of the command token; preserve others.
+  tokens[0] = ToLower(tokens[0]);
+
+  // Allow quoted message content and collapsing extra args
+  tokens = NormalizeAndSplit(tokens);
+
+  auto handlePing = [&](const std::vector<std::string>& args)
   {
-    if (tokens.size() < 3)
+    if (args.size() < 3)
     {
-      ERROR_LOG("Insufficient PING params.");
+      ERROR_LOG("[LS/CLI] ping: need nodeId and message");
       return;
     }
-    ++it;
     uint32_t nodeNumber = 0;
     {
-      std::istringstream sin(*it);
+      std::istringstream sin(args[1]);
       sin >> nodeNumber;
     }
-    ++it;
-    std::string pingMessage = *it;
+    const std::string pingMessage = args[2];
 
     Ipv4Address dest = ResolveNodeIpAddress(nodeNumber);
-    if (dest != Ipv4Address::GetAny())
+    if (dest == Ipv4Address::GetAny())
     {
-      uint32_t seq = GetNextSequenceNumber();
-      TRAFFIC_LOG("Sending PING_REQ to Node: " << nodeNumber
-                  << " IP: " << dest
-                  << " Message: " << pingMessage
-                  << " Seq: " << seq);
-      Ptr<PingRequest> pr = Create<PingRequest>(seq, Simulator::Now(), dest, pingMessage);
-      m_pingTracker.insert(std::make_pair(seq, pr));
-      Ptr<Packet> pkt = Create<Packet>();
-      LSMessage msg(LSMessage::PING_REQ, seq, m_maxTTL, m_mainAddress);
-      msg.SetPingReq(dest, pingMessage);
-      pkt->AddHeader(msg);
-      BroadcastPacket(pkt);
-    }
-  }
-  else if (cmd == "DUMP")
-  {
-    if (tokens.size() < 2)
-    {
-      ERROR_LOG("Insufficient Parameters!");
+      ERROR_LOG("[LS/CLI] ping: unknown node " << nodeNumber);
       return;
     }
-    ++it;
-    std::string what = *it;
-    if (what == "ROUTES" || what == "ROUTING")
+
+    uint32_t seq = GetNextSequenceNumber();
+    TRAFFIC_LOG("[LS/PING] send req -> N:" << nodeNumber
+                << " ip=" << dest
+                << " msg=\"" << pingMessage << "\""
+                << " seq=" << seq);
+
+    Ptr<PingRequest> pr = Create<PingRequest>(seq, Simulator::Now(), dest, pingMessage);
+    m_pingTracker.insert(std::make_pair(seq, pr));
+
+    Ptr<Packet> pkt = Create<Packet>();
+    LSMessage msg(LSMessage::PING_REQ, seq, m_maxTTL, m_mainAddress);
+    msg.SetPingReq(dest, pingMessage);
+    pkt->AddHeader(msg);
+    BroadcastPacket(pkt);
+  };
+
+  auto handleDump = [&](const std::vector<std::string>& args)
+  {
+    if (args.size() < 2)
+    {
+      ERROR_LOG("[LS/CLI] dump: need ROUTES|NEIGHBORS|LSA");
+      return;
+    }
+    const std::string what = ToLower(args[1]);
+    if (what == "routes" || what == "routing")
     {
       DumpRoutingTable();
     }
-    else if (what == "NEIGHBORS" || what == "neighborS")
+    else if (what == "neighbors" || what == "neighborS") // tolerant
     {
       DumpNeighbors();
     }
-    else if (what == "LSA")
+    else if (what == "lsa")
     {
       DumpLSA();
     }
+    else
+    {
+      ERROR_LOG("[LS/CLI] dump: unknown '" << args[1] << "'");
+    }
+  };
+
+  const std::string cmd = tokens[0];
+  if (cmd == "ping")
+  {
+    handlePing(tokens);
   }
+  else if (cmd == "dump")
+  {
+    handleDump(tokens);
+  }
+  // silently ignore unknown commands
 }
 
 // ---------------------------------------------------------------------------
-// Debug dumps (autograder calls inside)  — FIXED to print raw node IDs
+// Debug dumps (autograder calls inside) — prints raw node IDs
 // ---------------------------------------------------------------------------
 void
 LSRoutingProtocol::DumpLSA()
@@ -341,7 +405,7 @@ LSRoutingProtocol::DumpLSA()
     std::string linksString;
     for (const auto &edge : lsa.links)
     {
-      // Print pure node IDs to match grader expectations
+      // Print pure node IDs
       linksString += std::to_string(edge.first) + "(" + std::to_string(edge.second) + ") ";
     }
     checkLinkStateEntry(originatorId, lsa.sequenceNumber, linksString);
@@ -408,6 +472,7 @@ LSRoutingProtocol::RecvLSMessage(Ptr<Socket> socket)
 
   Ipv4Address incomingInterface;
   {
+    // Map interface index to its Ipv4InterfaceAddress::GetLocal()
     uint32_t idx = 1;
     for (auto it = m_socketAddresses.begin(); it != m_socketAddresses.end(); ++it)
     {
@@ -428,7 +493,7 @@ LSRoutingProtocol::RecvLSMessage(Ptr<Socket> socket)
     case LSMessage::HELLO_RSP: ProcessHello(lsMessage, incomingInterface); break;
     case LSMessage::LSA_m:     ProcessLSP(lsMessage, incomingInterface); break;
     default:
-      ERROR_LOG("Unknown Message Type!");
+      ERROR_LOG("[LS/RX] unknown message type");
       break;
   }
 }
@@ -439,7 +504,7 @@ LSRoutingProtocol::ProcessPingReq(LSMessage msg)
   if (!IsOwnAddress(msg.GetPingReq().destinationAddress)) return;
 
   std::string fromNode = ReverseLookup(msg.GetOriginatorAddress());
-  TRAFFIC_LOG("PING_REQ from " << fromNode << " msg='" << msg.GetPingReq().pingMessage << "'");
+  TRAFFIC_LOG("[LS/PING] RX req from N:" << fromNode << " msg=\"" << msg.GetPingReq().pingMessage << "\"");
   LSMessage rsp(LSMessage::PING_RSP, msg.GetSequenceNumber(), m_maxTTL, m_mainAddress);
   rsp.SetPingRsp(msg.GetOriginatorAddress(), msg.GetPingReq().pingMessage);
   Ptr<Packet> pkt = Create<Packet>();
@@ -456,12 +521,12 @@ LSRoutingProtocol::ProcessPingRsp(LSMessage msg)
   if (it != m_pingTracker.end())
   {
     std::string fromNode = ReverseLookup(msg.GetOriginatorAddress());
-    TRAFFIC_LOG("PING_RSP from " << fromNode << " msg='" << msg.GetPingRsp().pingMessage << "'");
+    TRAFFIC_LOG("[LS/PING] RX rsp from N:" << fromNode << " msg=\"" << msg.GetPingRsp().pingMessage << "\"");
     m_pingTracker.erase(it);
   }
   else
   {
-    DEBUG_LOG("Stale/unknown PING_RSP");
+    DEBUG_LOG("[LS/PING] stale/unknown response seq=" << msg.GetSequenceNumber());
   }
 }
 
@@ -500,7 +565,7 @@ LSRoutingProtocol::ProcessLSP(LSMessage msg, Ipv4Address /*incomingInterface*/)
   uint32_t seq = msg.GetSequenceNumber();
 
   auto it = m_linkStateDatabase.find(originatorId);
-  const bool isNew = (it == m_linkStateDatabase.end());
+  const bool isNew   = (it == m_linkStateDatabase.end());
   const bool isNewer = (!isNew && it->second.sequenceNumber < seq);
 
   if (isNew || isNewer)
@@ -520,7 +585,7 @@ LSRoutingProtocol::ProcessLSP(LSMessage msg, Ipv4Address /*incomingInterface*/)
 }
 
 // ---------------------------------------------------------------------------
-// Periodic maintenance — FIXED to self-install our LSA and run SPF
+// Periodic maintenance — self-install our LSA and run SPF
 // ---------------------------------------------------------------------------
 void
 LSRoutingProtocol::UpdateNetworkState()
@@ -539,7 +604,7 @@ LSRoutingProtocol::UpdateNetworkState()
   }
   m_neighbors.swap(pruned);
 
-  // 2) Send HELLO
+  // 2) Send HELLO (TTL=1)
   {
     LSMessage hello(LSMessage::HELLO_REQ, GetNextSequenceNumber(), 1, m_mainAddress);
     hello.SetHelloReq(Ipv4Address::GetAny(), "hello");
@@ -557,7 +622,7 @@ LSRoutingProtocol::UpdateNetworkState()
     edges.emplace_back(kv.first, kv.second.cost);
   }
 
-  // 4) NEW: Insert/refresh OUR OWN LSA in LSDB and run SPF immediately
+  // 4) Insert/refresh OUR OWN LSA in LSDB and run SPF immediately
   const uint32_t myId = std::stoul(ReverseLookup(m_mainAddress));
   {
     LsaRecord self;
@@ -676,11 +741,16 @@ LSRoutingProtocol::AuditPings()
   for (auto it = m_pingTracker.begin(); it != m_pingTracker.end(); )
   {
     Ptr<PingRequest> pr = it->second;
-    if (pr->GetTimestamp().GetMilliSeconds() + m_pingTimeout.GetMilliSeconds() <= Simulator::Now().GetMilliSeconds())
+    const auto ts  = pr->GetTimestamp().GetMilliSeconds();
+    const auto now = Simulator::Now().GetMilliSeconds();
+    const auto ttl = m_pingTimeout.GetMilliSeconds();
+
+    if (ts + ttl <= now)
     {
-      DEBUG_LOG("Ping expired: '" << pr->GetPingMessage()
-                << "' ts=" << pr->GetTimestamp().GetMilliSeconds()
-                << " now=" << Simulator::Now().GetMilliSeconds());
+      DEBUG_LOG("[LS/PING] expire seq=" << it->first
+                << " age_ms=" << (now - ts)
+                << " dest=" << pr->GetDestinationAddress()
+                << " msg=\"" << pr->GetPingMessage() << "\"");
       it = m_pingTracker.erase(it);
     }
     else
@@ -708,12 +778,11 @@ LSRoutingProtocol::SetIpv4(Ptr<Ipv4> ipv4)
 {
   NS_ASSERT(ipv4 != 0);
   NS_ASSERT(m_ipv4 == 0);
-  NS_LOG_DEBUG("Created ls::RoutingProtocol");
+  NS_LOG_DEBUG("[LS/BOOT] Created ls::RoutingProtocol");
   m_auditPingsTimer.SetFunction(&LSRoutingProtocol::AuditPings, this);
   m_updateTimer.SetFunction(&LSRoutingProtocol::UpdateNetworkState, this);
   m_ipv4 = ipv4;
   m_staticRouting->SetIpv4(m_ipv4);
 }
 
-// Optional autograder hook (kept for compatibility; no-op)
 void LSRoutingProtocol::checkLinkStateEntry(uint32_t, uint32_t, std::string) {}
