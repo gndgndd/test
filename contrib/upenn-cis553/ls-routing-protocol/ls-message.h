@@ -11,150 +11,180 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc. 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef LS_MESSAGE_H
-#define LS_MESSAGE_H
+#ifndef NS3_LS_MESSAGE_H
+#define NS3_LS_MESSAGE_H
 
 #include "ns3/header.h"
+#include "ns3/buffer.h"
 #include "ns3/ipv4-address.h"
-#include "ns3/object.h"
-#include "ns3/packet.h"
-#include <map>
-#include <vector>
-#include <memory>
-#include <cassert>
-#include <string>
 
-using namespace ns3;
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+#include <ostream>
 
 #define IPV4_ADDRESS_SIZE 4
 
+namespace ns3 {
+
+/**
+ * LSMessage: control-plane message used by the LS routing protocol.
+ * Supports PING_REQ, PING_RSP, HELLO_REQ, HELLO_RSP, and LSA_m.
+ *
+ * Implementation uses a small polymorphic payload hierarchy to keep
+ * serialization code clean and extensible.
+ */
 class LSMessage : public Header
 {
 public:
-  LSMessage();
-  LSMessage(const LSMessage& other);
-  LSMessage& operator=(const LSMessage& other);
-  virtual ~LSMessage();
-
-  enum MessageType
+  enum MessageType : uint8_t
   {
-    PING_REQ,
-    PING_RSP,
-    HELLO_REQ,
-    HELLO_RSP,
-    LSA_m,
+    PING_REQ = 1,
+    PING_RSP = 2,
+    HELLO_REQ = 3,
+    HELLO_RSP = 4,
+    LSA_m     = 5
   };
 
-  LSMessage(MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
+  // ===== ns-3 boilerplate =====
+  static TypeId GetTypeId (void);
+  virtual TypeId GetInstanceTypeId (void) const;
 
-  void SetMessageType(MessageType messageType);
-  MessageType GetMessageType() const;
-  void SetSequenceNumber(uint32_t sequenceNumber);
-  uint32_t GetSequenceNumber() const;
-  void SetOriginatorAddress(Ipv4Address originatorAddress);
-  Ipv4Address GetOriginatorAddress() const;
-  void SetTTL(uint8_t ttl);
-  uint8_t GetTTL() const;
+  // ===== ctors / dtors =====
+  LSMessage ();
+  LSMessage (MessageType t, uint32_t seq, uint8_t ttl, Ipv4Address origin);
+  LSMessage (const LSMessage& other);
+  LSMessage& operator= (const LSMessage& other);
+  virtual ~LSMessage ();
 
-private:
-  MessageType  m_messageType;
-  uint32_t     m_sequenceNumber;
-  Ipv4Address  m_originatorAddress;
-  uint8_t      m_ttl;
+  // ===== Header overrides =====
+  virtual void     Serialize (Buffer::Iterator start) const;
+  virtual uint32_t Deserialize (Buffer::Iterator start);
+  virtual uint32_t GetSerializedSize (void) const;
+  virtual void     Print (std::ostream &os) const;
 
-public:
-  static TypeId GetTypeId(void);
-  virtual TypeId GetInstanceTypeId(void) const;
-  void Print(std::ostream& os) const;
-  uint32_t GetSerializedSize(void) const;
-  void Serialize(Buffer::Iterator start) const;
-  uint32_t Deserialize(Buffer::Iterator start);
+  // ===== accessors (fixed header) =====
+  void         SetMessageType (MessageType t);
+  MessageType  GetMessageType () const;
 
-  // Payload base
-  struct MessagePayload {
-    virtual ~MessagePayload() = default;
-    virtual void Print(std::ostream& os) const = 0;
-    virtual uint32_t GetSerializedSize() const = 0;
-    virtual void Serialize(Buffer::Iterator& start) const = 0;
-    virtual uint32_t Deserialize(Buffer::Iterator& start) = 0;
-    virtual std::unique_ptr<MessagePayload> Clone() const = 0;
-  };
+  void         SetSequenceNumber (uint32_t s);
+  uint32_t     GetSequenceNumber (void) const;
 
-  // PING
-  struct PingReq : public MessagePayload {
-    Ipv4Address destinationAddress;
-    std::string pingMessage;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator& start) const override;
-    uint32_t Deserialize(Buffer::Iterator& start) override;
-    std::unique_ptr<MessagePayload> Clone() const override;
-  };
+  void         SetTTL (uint8_t ttl);
+  uint8_t      GetTTL (void) const;
 
-  struct PingRsp : public MessagePayload {
-    Ipv4Address destinationAddress;
-    std::string pingMessage;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator& start) const override;
-    uint32_t Deserialize(Buffer::Iterator& start) override;
-    std::unique_ptr<MessagePayload> Clone() const override;
-  };
+  void         SetOriginatorAddress (Ipv4Address a);
+  Ipv4Address  GetOriginatorAddress (void) const;
 
-  // HELLO
-  struct HelloReq : public MessagePayload {
-    Ipv4Address destinationAddress;
-    std::string helloMessage;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator& start) const override;
-    uint32_t Deserialize(Buffer::Iterator& start) override;
-    std::unique_ptr<MessagePayload> Clone() const override;
-  };
+  // ===== payload accessors (by type) =====
+  // Ping
+  struct PingReq;
+  struct PingRsp;
+  PingReq  GetPingReq () const;
+  void     SetPingReq (Ipv4Address dest, std::string payload);
+  PingRsp  GetPingRsp () const;
+  void     SetPingRsp (Ipv4Address dest, std::string payload);
 
-  struct HelloRsp : public MessagePayload {
-    Ipv4Address destinationAddress;
-    std::string helloMessage;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator& start) const override;
-    uint32_t Deserialize(Buffer::Iterator& start) override;
-    std::unique_ptr<MessagePayload> Clone() const override;
-  };
+  // Hello
+  struct HelloReq;
+  struct HelloRsp;
+  HelloReq GetHelloReq () const;
+  void     SetHelloReq (Ipv4Address dest, std::string message);
+  HelloRsp GetHelloRsp () const;
+  void     SetHelloRsp (Ipv4Address dest, std::string message);
 
   // LSA
-  struct Lsa : public MessagePayload {
-    std::vector<std::pair<uint32_t, uint32_t>> linkVector;
-    void Print(std::ostream& os) const override;
-    uint32_t GetSerializedSize() const override;
-    void Serialize(Buffer::Iterator& start) const override;
-    uint32_t Deserialize(Buffer::Iterator& start) override;
-    std::unique_ptr<MessagePayload> Clone() const override;
+  struct Lsa;
+  Lsa      GetLsa () const;
+  void     SetLsa (const std::vector<std::pair<uint32_t,uint32_t>>& links);
+
+  // ===== payload base =====
+  struct MessagePayload
+  {
+    virtual ~MessagePayload () {}
+
+    virtual std::unique_ptr<MessagePayload> Clone () const = 0;
+    virtual uint32_t GetSerializedSize () const = 0;
+    virtual void     Print (std::ostream& os) const = 0;
+    virtual void     Serialize (Buffer::Iterator &start) const = 0;
+    virtual uint32_t Deserialize (Buffer::Iterator &start) = 0;
+  };
+
+  // ===== concrete payloads =====
+  struct PingReq : public MessagePayload
+  {
+    Ipv4Address destinationAddress;
+    std::string pingMessage;
+
+    std::unique_ptr<MessagePayload> Clone () const override;
+    uint32_t GetSerializedSize () const override;
+    void     Print (std::ostream& os) const override;
+    void     Serialize (Buffer::Iterator &start) const override;
+    uint32_t Deserialize (Buffer::Iterator &start) override;
+  };
+
+  struct PingRsp : public MessagePayload
+  {
+    Ipv4Address destinationAddress;
+    std::string pingMessage;
+
+    std::unique_ptr<MessagePayload> Clone () const override;
+    uint32_t GetSerializedSize () const override;
+    void     Print (std::ostream& os) const override;
+    void     Serialize (Buffer::Iterator &start) const override;
+    uint32_t Deserialize (Buffer::Iterator &start) override;
+  };
+
+  struct HelloReq : public MessagePayload
+  {
+    Ipv4Address destinationAddress;
+    std::string helloMessage;
+
+    std::unique_ptr<MessagePayload> Clone () const override;
+    uint32_t GetSerializedSize () const override;
+    void     Print (std::ostream& os) const override;
+    void     Serialize (Buffer::Iterator &start) const override;
+    uint32_t Deserialize (Buffer::Iterator &start) override;
+  };
+
+  struct HelloRsp : public MessagePayload
+  {
+    Ipv4Address destinationAddress;
+    std::string helloMessage;
+
+    std::unique_ptr<MessagePayload> Clone () const override;
+    uint32_t GetSerializedSize () const override;
+    void     Print (std::ostream& os) const override;
+    void     Serialize (Buffer::Iterator &start) const override;
+    uint32_t Deserialize (Buffer::Iterator &start) override;
+  };
+
+  struct Lsa : public MessagePayload
+  {
+    // Vector of (neighborNodeId, cost)
+    std::vector<std::pair<uint32_t,uint32_t>> linkVector;
+
+    std::unique_ptr<MessagePayload> Clone () const override;
+    uint32_t GetSerializedSize () const override;
+    void     Print (std::ostream& os) const override;
+    void     Serialize (Buffer::Iterator &start) const override;
+    uint32_t Deserialize (Buffer::Iterator &start) override;
   };
 
 private:
-  std::unique_ptr<MessagePayload> m_payload;
+  MessageType  m_messageType { PING_REQ };
+  uint32_t     m_sequenceNumber { 0 };
+  Ipv4Address  m_originatorAddress;
+  uint8_t      m_ttl { 0 };
 
-public:
-  // Convenience accessors/mutators (keep names to match your current code)
-  PingReq GetPingReq() const;
-  void SetPingReq(Ipv4Address destinationAddress, std::string message);
-  PingRsp GetPingRsp() const;
-  void SetPingRsp(Ipv4Address destinationAddress, std::string message);
-  HelloReq GetHelloReq() const;
-  void SetHelloReq(Ipv4Address destinationAddress, std::string message);
-  HelloRsp GetHelloRsp() const;
-  void SetHelloRsp(Ipv4Address destinationAddress, std::string message);
-  Lsa GetLsa() const;
-  void SetLsa(const std::vector<std::pair<uint32_t, uint32_t>>& links);
+  std::unique_ptr<MessagePayload> m_payload;
 };
 
-static inline std::ostream& operator<< (std::ostream& os, const LSMessage& message)
-{
-  message.Print(os);
-  return os;
-}
-#endif
+} // namespace ns3
+
+#endif // NS3_LS_MESSAGE_H
