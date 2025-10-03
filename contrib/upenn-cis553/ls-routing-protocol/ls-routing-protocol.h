@@ -11,7 +11,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc. 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef LS_ROUTING_H
@@ -45,29 +45,30 @@ public:
   LSRoutingProtocol();
   virtual ~LSRoutingProtocol();
 
-  // CLI support from harness
+  // Command interface from the simulator harness
   virtual void ProcessCommand(std::vector<std::string> tokens);
 
-  // Setup from harness
+  // Harness setup
   virtual void SetMainInterface(uint32_t mainInterface);
   virtual void SetNodeAddressMap(std::map<uint32_t, Ipv4Address> nodeAddressMap);
   virtual void SetAddressNodeMap(std::map<Ipv4Address, uint32_t> addressNodeMap);
 
-  // Message Handling
+  // Message handling (control plane socket)
   void RecvLSMessage(Ptr<Socket> socket);
   void ProcessPingReq(LSMessage lsMessage);
   void ProcessPingRsp(LSMessage lsMessage);
   void ProcessHello(LSMessage lsMessage, Ipv4Address incomingInterface);
   void ProcessLSP(LSMessage lsMessage, Ipv4Address incomingInterface);
 
-  // Periodic tasks and calculations
+  // Periodic tasks and SPF
   void AuditPings();
   void UpdateNetworkState();
   void ComputeShortestPaths();
 
-  // From Ipv4RoutingProtocol
+  // Ipv4RoutingProtocol overrides
   virtual void PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit unit = Time::S) const;
-  virtual Ptr<Ipv4Route> RouteOutput(Ptr<Packet> p, const Ipv4Header &header, Ptr<NetDevice> oif, Socket::SocketErrno &sockerr);
+  virtual Ptr<Ipv4Route> RouteOutput(Ptr<Packet> p, const Ipv4Header &header, Ptr<NetDevice> oif,
+                                     Socket::SocketErrno &sockerr);
   virtual bool RouteInput(Ptr<const Packet> p, const Ipv4Header &header, Ptr<const NetDevice> idev,
                           UnicastForwardCallback ucb, MulticastForwardCallback mcb, LocalDeliverCallback lcb,
                           ErrorCallback ecb);
@@ -76,15 +77,20 @@ public:
   virtual void NotifyAddAddress(uint32_t interface, Ipv4InterfaceAddress address);
   virtual void NotifyRemoveAddress(uint32_t interface, Ipv4InterfaceAddress address);
   virtual void SetIpv4(Ptr<Ipv4> ipv4);
+
   void DoDispose();
 
 private:
+  // Utility
   void BroadcastPacket(Ptr<Packet> packet);
   virtual Ipv4Address ResolveNodeIpAddress(uint32_t nodeNumber);
-  virtual std::string ReverseLookup(Ipv4Address ipv4Address);
+  virtual std::string  ReverseLookup(Ipv4Address ipv4Address);
+
+  // Status/debug
   void DumpLSA();
   void DumpNeighbors();
   void DumpRoutingTable();
+
   void checkLinkStateEntry(uint32_t originatorId, uint32_t sequenceNumber, std::string links);
 
 protected:
@@ -93,23 +99,23 @@ protected:
   bool IsOwnAddress(Ipv4Address originatorAddress);
 
 private:
-  // Interface sockets
+  // Interfaces/sockets
   std::map<Ptr<Socket>, Ipv4InterfaceAddress> m_socketAddresses;
-  Ptr<Socket> m_recvSocket;
-  Ipv4Address m_mainAddress;
+  Ptr<Socket>          m_recvSocket;     // receiving socket
+  Ipv4Address          m_mainAddress;    // primary IP of this node
   Ptr<Ipv4StaticRouting> m_staticRouting;
-  Ptr<Ipv4> m_ipv4;
+  Ptr<Ipv4>              m_ipv4;
 
-  // Attributes / state
-  Time     m_pingTimeout;
-  Time     m_updateInterval;
-  uint8_t  m_maxTTL;
-  uint16_t m_lsPort;
-  uint32_t m_currentSequenceNumber;
+  // Attributes/state
+  Time      m_pingTimeout;
+  Time      m_updateInterval;
+  uint8_t   m_maxTTL;
+  uint16_t  m_lsPort;
+  uint32_t  m_currentSequenceNumber;
 
   // Harness address maps
-  std::map<uint32_t, Ipv4Address> m_nodeAddressMap;
-  std::map<Ipv4Address, uint32_t> m_addressNodeMap;
+  std::map<uint32_t, Ipv4Address>   m_nodeAddressMap;
+  std::map<Ipv4Address, uint32_t>   m_addressNodeMap;
 
   // Timers
   Timer m_auditPingsTimer;
@@ -118,13 +124,12 @@ private:
   // Ping tracker
   std::map<uint32_t, Ptr<PingRequest>> m_pingTracker;
 
-  // ===== Internal LS data structures (renamed for uniqueness) =====
-
+  // ===== Internal LS data structures =====
   struct AdjacencyRecord {
-    Ipv4Address address;       // neighbor's IP
-    Ipv4Address interface;     // our outgoing interface IP
-    Time        lastHeard;     // last response time
-    uint32_t    cost;          // link metric (unit)
+    Ipv4Address address;        // neighbor’s IP
+    Ipv4Address interface;      // our outgoing interface IP
+    Time        lastHeard;      // last HELLO_RSP time
+    uint32_t    cost;           // link metric (unit)
   };
 
   struct LsaRecord {
