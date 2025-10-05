@@ -52,6 +52,9 @@ public:
   // Return a copy of the table for safe iteration and printing.
   std::vector<NeighborTableEntry> Snapshot() const;
 
+  // Returns true if address has entry in neighbor table, false otherwise
+  bool Contains(Ipv4Address address);
+
 private:
   std::map<Ipv4Address, NeighborTableEntry> m_table;
   Time m_timeout;
