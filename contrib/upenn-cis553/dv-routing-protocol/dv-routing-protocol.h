@@ -39,6 +39,16 @@
 
 using namespace ns3;
 
+// ---------------- MS2 Routing Table (Part 2) ----------------
+struct RoutingTableEntry
+{
+   Ipv4Address dest;
+   Ipv4Address nextHop;
+   Ipv4Address interface;
+   uint32_t cost;
+   Time timestamp;
+};
+
 class DVRoutingProtocol : public PennRoutingProtocol
 {
 public:
@@ -96,6 +106,19 @@ public:
   // Periodic Audit
   void AuditPings();
   void AuditHellos();
+
+   // ---------------- MS2 Routing Table (Part 2) ----------------
+   // Insert or update routing table entry based on incoming route information
+   uint32_t UpdateRoute(Ipv4Address dest, Ipv4Address source, Ipv4Address sourceInterface, uint32_t cost);
+
+   // Checks for loss of neighbors and removes invalid routes from routing table
+   void CheckNeighborLoss();
+
+   // Processes DV_UPDATE message from neighbor node
+   void ProcessDvUpdate(DVMessage dvMessage, Ipv4Address sourceInterface);
+
+   // Return a copy of the table for safe iteration and printing.
+   std::vector<RoutingTableEntry> Snapshot() const;
 
   // From Ipv4RoutingProtocol
 
@@ -225,6 +248,10 @@ private:
   void ProcessHelloReq(DVMessage dvMessage);
   void ProcessHelloRsp(DVMessage dvMessage, Ipv4Address localInterfaceAddress);
 
+  // ---------------- MS2 related (Part 1: messaging + timers) ----------------
+  void SendPeriodicUpdate(); // MS2 related: build & broadcast a DV_UPDATE with current vector (periodic push)
+  void TriggerUpdateSoon();  // MS2 related: coalesce/schedule a near-term DV_UPDATE after changes (rate-limited)
+
 protected:
   virtual void DoInitialize(void);
   uint32_t GetNextSequenceNumber();
@@ -254,6 +281,15 @@ private:
   // Milestone 1: Neighbor table and Neighbor timers
   NeighborTable m_neighbors;
   Ptr<NeighborTimers> m_neighborTimers;
+
+  // ---------------- MS2 related timers (Part 1) ----------------
+  Timer m_periodicUpdateTimer;                // MS2 related: fires every m_periodicInterval to send DV_UPDATE
+  Timer m_triggeredUpdateTimer;               // MS2 related: short hold-down to merge rapid changes into one update
+  Time  m_periodicInterval { Seconds(2.0) };  // MS2 related: default periodic interval for advertisements
+  Time  m_triggerHold      { MilliSeconds(300) }; // MS2 related: throttle window for triggered updates
+
+  // ---------------- MS2 Routing Table (Part 2) ----------------
+  std::map<Ipv4Address, RoutingTableEntry> m_routingTable;
 };
 
 #endif
