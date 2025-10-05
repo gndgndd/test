@@ -78,6 +78,14 @@ NeighborTable::Size() const
   return static_cast<uint32_t>(m_table.size());
 }
 
+bool NeighborTable::Contains(Ipv4Address address) {
+  if (m_table.count(address) == 0) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
 /**
  * Create a snapshot of the neighbor table.
  * Copies all entries into a vector to allow safe iteration without being
