@@ -39,6 +39,9 @@ NS_OBJECT_ENSURE_REGISTERED(DVRoutingProtocol);
 
 #define DV_MAX_SEQUENCE_NUMBER 0xFFFF
 #define DV_PORT_NUMBER 698
+#define ROUTE_NOT_UPDATED 0
+#define ROUTE_UPDATED 1
+#define INVALIDATED_ROUTE 1000
 
 TypeId
 DVRoutingProtocol::GetTypeId(void)
@@ -65,7 +68,9 @@ DVRoutingProtocol::GetTypeId(void)
 }
 
 DVRoutingProtocol::DVRoutingProtocol()
-    : m_auditPingsTimer(Timer::CANCEL_ON_DESTROY)
+    : m_auditPingsTimer(Timer::CANCEL_ON_DESTROY),
+      m_periodicUpdateTimer(Timer::CANCEL_ON_DESTROY),   // MS2 related: periodic DV advertisements driver
+      m_triggeredUpdateTimer(Timer::CANCEL_ON_DESTROY)   // MS2 related: coalesces near-term triggered updates
 {
 
   m_currentSequenceNumber = 0;
@@ -98,6 +103,8 @@ void DVRoutingProtocol::DoDispose()
 
   // Cancel timers
   m_auditPingsTimer.Cancel();
+  m_periodicUpdateTimer.Cancel();    // MS2 related: stop periodic DV updates
+  m_triggeredUpdateTimer.Cancel();   // MS2 related: stop triggered updates
   m_pingTracker.clear();
 
   PennRoutingProtocol::DoDispose();
@@ -209,6 +216,14 @@ void DVRoutingProtocol::DoInitialize()
     //m_neighborTimers->SetHelloCallback(MakeCallback(&DVRoutingProtocol::SendHellos, this));
     m_neighborTimers->SetAuditCallback(MakeCallback(&DVRoutingProtocol::AuditHellos, this));
     m_neighborTimers->Start();
+
+    // ---------------- MS2 related (Part 1) ----------------
+    // Periodic DV advertisements: bind the sender and schedule first fire.
+    m_periodicUpdateTimer.SetFunction(&DVRoutingProtocol::SendPeriodicUpdate, this);  // MS2 related: hook timer -> sender
+    m_periodicUpdateTimer.Schedule(m_periodicInterval);                                // MS2 related: start periodic DV_UPDATE cadence
+
+    // Triggered updates: reuse same sender; fire only when TriggerUpdateSoon() schedules it.
+    m_triggeredUpdateTimer.SetFunction(&DVRoutingProtocol::SendPeriodicUpdate, this); // MS2 related: coalesced on-change DV_UPDATE
 
     AuditPings();
     NS_LOG_DEBUG("Starting DV on node " << m_mainAddress);
@@ -365,7 +380,24 @@ void DVRoutingProtocol::DumpRoutingTable()
              << "**************** Route Table ********************" << std::endl
              << "DestNumber\t\tDestAddr\t\tNextHopNumber\t\tNextHopAddr\t\tInterfaceAddr\t\tCost");
 
-  PRINT_LOG("");
+  PRINT_LOG(""); //blank line to match output
+  std::vector<RoutingTableEntry> routes = Snapshot();
+  PRINT_LOG(routes.size()); // Print number of routes
+  for (const auto& entry : routes) {
+    PRINT_LOG(ReverseLookup(entry.dest) << "\t\t\t"
+               << entry.dest << "\t\t"
+               << ReverseLookup(entry.nextHop) << "\t\t\t"
+               << entry.nextHop << "\t\t"
+               << entry.interface << "\t\t"
+               << entry.cost);
+
+  /* NOTE: For purpose of autograding, you should invoke the following function for each
+  routing table entry. The output format is indicated by parameter name and type.
+  */
+  //  checkRouteTableEntry();
+      checkRouteTableEntry(ReverseLookup(entry.dest), entry.dest, 
+        strtoul(ReverseLookup(entry.nextHop).c_str(), NULL, 10), entry.nextHop, entry.interface, entry.cost);
+  }
 
   /* NOTE: For purpose of autograding, you should invoke the following function for each
   routing table entry. The output format is indicated by parameter name and type.
@@ -417,6 +449,10 @@ void DVRoutingProtocol::RecvDVMessage(Ptr<Socket> socket)
   case DVMessage::HELLO_RSP:
     ProcessHelloRsp(dvMessage, interface);
     break;
+  case DVMessage::DV_UPDATE: // MS2 part 2 related
+   /* MS2 Part 2 will process */
+    ProcessDvUpdate(dvMessage, interface);
+    break;  
   default:
     ERROR_LOG("Unknown Message Type!");
     break;
@@ -504,7 +540,7 @@ bool DVRoutingProtocol::IsOwnAddress(Ipv4Address originatorAddress)
 }
 
 // Oliver: Handle periodic broadcasting of hello_req and checking neighborhood table for expired entries
-void DVRoutingProtocol::AuditHellos() 
+void DVRoutingProtocol::AuditHellos()
 {
   // Send Periodic HelloReq
   DVMessage dvReq = DVMessage(DVMessage::HELLO_RSP, 0, 1, m_mainAddress);
@@ -573,4 +609,147 @@ void DVRoutingProtocol::SetIpv4(Ptr<Ipv4> ipv4)
   m_auditPingsTimer.SetFunction(&DVRoutingProtocol::AuditPings, this);
   m_ipv4 = ipv4;
   m_staticRouting->SetIpv4(m_ipv4);
+}
+
+/* ---------------- MS2 related (Part 1) ---------------- */
+
+// Build and send a DV_UPDATE on all interfaces.
+// Part 1: the advertised vector is minimal (only self route with cost=0).
+// Part 2 will replace this with real DV routes + split horizon/poison reverse.
+void DVRoutingProtocol::SendPeriodicUpdate()
+{
+  CheckNeighborLoss();
+
+  DEBUG_LOG("Sending Periodic Update");
+  // Minimal vector: advertise reachability to self with cost 0.
+  std::vector<DVMessage::DvVectorItem> vec;
+  vec.push_back({ m_mainAddress, 0 });
+
+  // MS2 related (Part 2): attach the DV vector payload (currently only self, cost=0)
+  if (vec.size() > 0) {
+    for (auto it = m_routingTable.begin(); it != m_routingTable.end(); ++it)
+      {
+        const auto& e = it->second;
+        if (e.dest == m_mainAddress) continue;
+        vec.push_back( {e.dest, std::min(16u, e.cost) } );
+      } // Still to do: split horizon/poison reverse
+  }
+  DVMessage msg(DVMessage::DV_UPDATE, GetNextSequenceNumber(), m_maxTTL, m_mainAddress);
+  msg.SetDvUpdate(vec);
+
+  for (const auto& kv : m_socketAddresses)
+  {
+    Ptr<Socket> sock = kv.first;
+    const Ipv4InterfaceAddress& ifAddr = kv.second;
+    Ptr<Packet> p = Create<Packet>();
+    p->AddHeader(msg);
+    Ipv4Address bcast = ifAddr.GetLocal().GetSubnetDirectedBroadcast(ifAddr.GetMask());
+    sock->SendTo(p, 0, InetSocketAddress(bcast, DV_PORT_NUMBER));
+  }
+  // Re-schedule periodic
+  m_periodicUpdateTimer.Cancel();
+  m_periodicUpdateTimer.Schedule(m_periodicInterval);  // MS2 related: keep the periodic DV_UPDATE cadence running
+}
+
+// Coalesce triggered updates; schedule a send soon (reuses periodic sender)
+void DVRoutingProtocol::TriggerUpdateSoon()
+{
+  if (m_triggeredUpdateTimer.IsRunning()) return;
+  m_triggeredUpdateTimer.Schedule(m_triggerHold);      // MS2 related: defer briefly so multiple changes collapse into one update
+}
+
+/* ---------------- MS2 related (Part 2) ---------------- */
+
+// MS2 Part 2: DV Routing Protocol methods
+
+// dv-routing-protocol.cc
+void DVRoutingProtocol::CheckNeighborLoss() {
+  // Snapshot current neighbors
+  std::vector<NeighborTableEntry> neighbors = m_neighbors.Snapshot();
+
+  // For each route, verify the next hop is still a neighbor
+  for (auto &kv : m_routingTable) {
+    const Ipv4Address nextHop = kv.second.nextHop;
+
+    bool stillNeighbor = false;
+    for (const auto &n : neighbors) {
+      if (n.neighborAddress == nextHop) { // NeighborTableEntry field name used elsewhere
+        stillNeighbor = true;
+        break;
+      }
+    }
+
+    if (!stillNeighbor) {
+      kv.second.cost = INVALIDATED_ROUTE;  // Mark route invalid if next hop is gone
+    }
+  }
+}
+
+
+uint32_t DVRoutingProtocol::UpdateRoute(Ipv4Address dest, Ipv4Address source, Ipv4Address sourceInterface, uint32_t sourceCost) {
+  // Invalid route: If neighbor's route has been invalidated 
+  if (sourceCost == INVALIDATED_ROUTE) {
+    if (m_routingTable.count(dest) > 0) {
+      if (m_routingTable[dest].nextHop == source) {
+        m_routingTable[dest].cost = INVALIDATED_ROUTE;
+        return ROUTE_UPDATED;
+      } else {
+        return ROUTE_NOT_UPDATED;
+      }
+    } else {
+      return ROUTE_NOT_UPDATED;
+    }
+  // New route: If no route exists for destination node
+  } else if (m_routingTable.count(dest) == 0) {
+    RoutingTableEntry &e = m_routingTable[dest];
+      e.dest = dest;
+      e.nextHop = source;
+      e.interface = sourceInterface;
+      e.cost = sourceCost + 1;
+      e.timestamp = Simulator::Now();
+      return ROUTE_UPDATED;
+  // Good News: If received route is better than existing route
+  } else if (m_routingTable[dest].cost == INVALIDATED_ROUTE || sourceCost + 1 < m_routingTable[dest].cost) {
+      m_routingTable[dest].nextHop = source;
+      m_routingTable[dest].interface = sourceInterface;
+      m_routingTable[dest].cost = sourceCost + 1;
+      m_routingTable[dest].timestamp = Simulator::Now();
+      return ROUTE_UPDATED;
+  // Bad News: If received route is worse but source is being used as next hop
+  } else if (m_routingTable[dest].nextHop == source) {
+      m_routingTable[dest].cost = sourceCost + 1;
+      return ROUTE_UPDATED;
+  // Otherwise, if existing route is better, ignore
+  } else {
+    return ROUTE_NOT_UPDATED;
+  }
+}
+
+//
+void DVRoutingProtocol::ProcessDvUpdate(DVMessage dvMessage, Ipv4Address sourceInterface) {
+  //Process message and retrieve information from packet
+  Ipv4Address neighbor = dvMessage.GetOriginatorAddress();
+  DEBUG_LOG("Received DV_UPDATE, From: " << neighbor);
+  bool updated = false;
+  for (const auto& entry : dvMessage.GetDvUpdate().vec) {
+    if (entry.dest == m_mainAddress) continue;
+    if (UpdateRoute(entry.dest, neighbor, sourceInterface, entry.cost)
+          == ROUTE_UPDATED) {
+            updated = true;
+          }
+  }
+  if (updated) {
+    TriggerUpdateSoon();
+    DEBUG_LOG("Triggered DV update due to routing change(s)");
+  }
+}
+
+std::vector<RoutingTableEntry> DVRoutingProtocol::Snapshot() const {
+  std::vector<RoutingTableEntry> v;
+  v.reserve(m_routingTable.size());
+  for (const auto &kv : m_routingTable) {
+    if (kv.second.cost > 16) continue;
+    v.push_back(kv.second);
+  }
+  return v;
 }
