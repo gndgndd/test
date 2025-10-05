@@ -381,7 +381,8 @@ void DVRoutingProtocol::DumpRoutingTable()
              << "DestNumber\t\tDestAddr\t\tNextHopNumber\t\tNextHopAddr\t\tInterfaceAddr\t\tCost");
 
   PRINT_LOG(""); //blank line to match output
-  std::vector<RoutingTableEntry> routes = Snapshot();
+  
+  /*std::vector<RoutingTableEntry> routes = Snapshot();
   PRINT_LOG(routes.size()); // Print number of routes
   for (const auto& entry : routes) {
     PRINT_LOG(ReverseLookup(entry.dest) << "\t\t\t"
@@ -391,18 +392,31 @@ void DVRoutingProtocol::DumpRoutingTable()
                << entry.interface << "\t\t"
                << entry.cost);
 
-  /* NOTE: For purpose of autograding, you should invoke the following function for each
-  routing table entry. The output format is indicated by parameter name and type.
-  */
+  // NOTE: For purpose of autograding, you should invoke the following function for each
+  // routing table entry. The output format is indicated by parameter name and type.
   //  checkRouteTableEntry();
-      checkRouteTableEntry(ReverseLookup(entry.dest), entry.dest, 
-        strtoul(ReverseLookup(entry.nextHop).c_str(), NULL, 10), entry.nextHop, entry.interface, entry.cost);
-  }
 
-  /* NOTE: For purpose of autograding, you should invoke the following function for each
-  routing table entry. The output format is indicated by parameter name and type.
-  */
+      checkRouteTableEntry(ReverseLookup(entry.dest), entry.dest, 
+          strtoul(ReverseLookup(entry.nextHop).c_str(), NULL, 10), entry.nextHop, entry.interface, entry.cost);
+  }*/
+
+  PRINT_LOG(m_routingTable.size()); // Print number of routes
+  for (auto it = m_routingTable.begin(); it != m_routingTable.end(); ++it) {
+      const auto& entry = it->second;
+      PRINT_LOG(ReverseLookup(entry.dest) << "\t\t\t"
+                << entry.dest << "\t\t"
+                << ReverseLookup(entry.nextHop) << "\t\t\t"
+                << entry.nextHop << "\t\t"
+                << entry.interface << "\t\t"
+                << entry.cost);
+
+  //NOTE: For purpose of autograding, you should invoke the following function for each
+  //routing table entry. The output format is indicated by parameter name and type.
   //  checkRouteTableEntry();
+
+      checkRouteTableEntry(ReverseLookup(entry.dest), entry.dest, 
+          strtoul(ReverseLookup(entry.nextHop).c_str(), NULL, 10), entry.nextHop, entry.interface, entry.cost);
+  }
 }
 
 void DVRoutingProtocol::RecvDVMessage(Ptr<Socket> socket)
@@ -662,29 +676,13 @@ void DVRoutingProtocol::TriggerUpdateSoon()
 
 // MS2 Part 2: DV Routing Protocol methods
 
-// dv-routing-protocol.cc
 void DVRoutingProtocol::CheckNeighborLoss() {
-  // Snapshot current neighbors
-  std::vector<NeighborTableEntry> neighbors = m_neighbors.Snapshot();
-
-  // For each route, verify the next hop is still a neighbor
-  for (auto &kv : m_routingTable) {
-    const Ipv4Address nextHop = kv.second.nextHop;
-
-    bool stillNeighbor = false;
-    for (const auto &n : neighbors) {
-      if (n.neighborAddress == nextHop) { // NeighborTableEntry field name used elsewhere
-        stillNeighbor = true;
-        break;
-      }
+  for (auto it = m_routingTable.begin(); it != m_routingTable.end(); ++it)
+    {
+      if (!m_neighbors.Contains(it->second.nextHop))
+        it->second.cost = INVALIDATED_ROUTE;
     }
-
-    if (!stillNeighbor) {
-      kv.second.cost = INVALIDATED_ROUTE;  // Mark route invalid if next hop is gone
-    }
-  }
 }
-
 
 uint32_t DVRoutingProtocol::UpdateRoute(Ipv4Address dest, Ipv4Address source, Ipv4Address sourceInterface, uint32_t sourceCost) {
   // Invalid route: If neighbor's route has been invalidated 
@@ -746,6 +744,7 @@ void DVRoutingProtocol::ProcessDvUpdate(DVMessage dvMessage, Ipv4Address sourceI
 
 std::vector<RoutingTableEntry> DVRoutingProtocol::Snapshot() const {
   std::vector<RoutingTableEntry> v;
+
   v.reserve(m_routingTable.size());
   for (const auto &kv : m_routingTable) {
     if (kv.second.cost > 16) continue;
