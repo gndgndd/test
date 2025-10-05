@@ -29,9 +29,6 @@
 #include "ns3/uinteger.h"
 #include <ctime>
 
-#include "ns3/neighbor-table.h"
-#include "ns3/neighbor-timers.h"
-
 using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("DVRoutingProtocol");
@@ -39,9 +36,14 @@ NS_OBJECT_ENSURE_REGISTERED(DVRoutingProtocol);
 
 #define DV_MAX_SEQUENCE_NUMBER 0xFFFF
 #define DV_PORT_NUMBER 698
-#define ROUTE_NOT_UPDATED 0
-#define ROUTE_UPDATED 1
-#define INVALIDATED_ROUTE 1000
+
+struct NeighborTableEntry
+  {
+  Ipv4Address neighborAddr;
+  Ipv4Address interfaceAddr;
+  int timestamp;
+  };
+
 
 TypeId
 DVRoutingProtocol::GetTypeId(void)
@@ -68,9 +70,7 @@ DVRoutingProtocol::GetTypeId(void)
 }
 
 DVRoutingProtocol::DVRoutingProtocol()
-    : m_auditPingsTimer(Timer::CANCEL_ON_DESTROY),
-      m_periodicUpdateTimer(Timer::CANCEL_ON_DESTROY),   // MS2 related: periodic DV advertisements driver
-      m_triggeredUpdateTimer(Timer::CANCEL_ON_DESTROY)   // MS2 related: coalesces near-term triggered updates
+    : m_auditPingsTimer(Timer::CANCEL_ON_DESTROY)
 {
 
   m_currentSequenceNumber = 0;
@@ -103,8 +103,6 @@ void DVRoutingProtocol::DoDispose()
 
   // Cancel timers
   m_auditPingsTimer.Cancel();
-  m_periodicUpdateTimer.Cancel();    // MS2 related: stop periodic DV updates
-  m_triggeredUpdateTimer.Cancel();   // MS2 related: stop triggered updates
   m_pingTracker.clear();
 
   PennRoutingProtocol::DoDispose();
@@ -210,22 +208,8 @@ void DVRoutingProtocol::DoInitialize()
 
   if (canRunDV)
   {
-    // Configure and start NeighborTimers
-    m_neighborTimers = CreateObject<NeighborTimers>();
-    m_neighborTimers->Configure(Seconds(1.0), Seconds(1.0));
-    //m_neighborTimers->SetHelloCallback(MakeCallback(&DVRoutingProtocol::SendHellos, this));
-    m_neighborTimers->SetAuditCallback(MakeCallback(&DVRoutingProtocol::AuditHellos, this));
-    m_neighborTimers->Start();
-
-    // ---------------- MS2 related (Part 1) ----------------
-    // Periodic DV advertisements: bind the sender and schedule first fire.
-    m_periodicUpdateTimer.SetFunction(&DVRoutingProtocol::SendPeriodicUpdate, this);  // MS2 related: hook timer -> sender
-    m_periodicUpdateTimer.Schedule(m_periodicInterval);                                // MS2 related: start periodic DV_UPDATE cadence
-
-    // Triggered updates: reuse same sender; fire only when TriggerUpdateSoon() schedules it.
-    m_triggeredUpdateTimer.SetFunction(&DVRoutingProtocol::SendPeriodicUpdate, this); // MS2 related: coalesced on-change DV_UPDATE
-
     AuditPings();
+    HelloBroadcastPacket();
     NS_LOG_DEBUG("Starting DV on node " << m_mainAddress);
   }
 }
@@ -300,6 +284,25 @@ void DVRoutingProtocol::BroadcastPacket(Ptr<Packet> packet)
   }
 }
 
+
+void DVRoutingProtocol::HelloBroadcastPacket()
+{ 
+
+  uint32_t sequenceNumber = GetNextSequenceNumber ();
+  std::string hello = "hello";
+  DVMessage dvResp = DVMessage(DVMessage::HELLO_REQ, sequenceNumber, 1, m_mainAddress);
+  dvResp.SetHelloReq(hello);
+  Ptr<Packet> packet = Create<Packet>();
+  packet->AddHeader(dvResp);
+
+
+
+  BroadcastPacket(packet);
+  m_helloTimer.Schedule(m_pingTimeout);
+
+}
+
+
 void DVRoutingProtocol::ProcessCommand(std::vector<std::string> tokens)
 {
   std::vector<std::string>::iterator iterator = tokens.begin();
@@ -354,24 +357,29 @@ void DVRoutingProtocol::ProcessCommand(std::vector<std::string> tokens)
 
 void DVRoutingProtocol::DumpNeighbors()
 {
+  for (std::map<std::string, NeighborTableEntry>::iterator iter = m_neighbors.begin();
+         iter != m_neighbors.end(); iter++)
+  {
+    if(iter->second.timestamp + m_pingTimeout.GetMilliSeconds() <= Simulator::Now().GetMilliSeconds()){
+      m_neighbors.erase(iter);
+    }
+  }
+  
   STATUS_LOG(std::endl
              << "**************** Neighbor List ********************" << std::endl
              << "NeighborNumber\t\tNeighborAddr\t\tInterfaceAddr");
-  //PRINT_LOG("");
-
-  std::vector<NeighborTableEntry> neighbors = m_neighbors.Snapshot();
-  PRINT_LOG(neighbors.size()); // Print number of neighbors
-  for (const auto& entry : neighbors) {
-    PRINT_LOG(ReverseLookup(entry.neighborAddress) << "\t\t\t"
-               << entry.neighborAddress << "\t\t"
-               << entry.interfaceAddress);
-
-    /* NOTE: For purpose of autograding, you should invoke the following function for each
-    neighbor table entry. The output format is indicated by parameter name and type.
-    */
-    //  checkNeighborTableEntry();
-    checkNeighborTableEntry(ReverseLookup(entry.neighborAddress), entry.neighborAddress, entry.interfaceAddress);
-  }
+  
+  for (std::map<std::string, NeighborTableEntry>::iterator iter = m_neighbors.begin();
+         iter != m_neighbors.end(); iter++){
+         NeighborTableEntry neighborEntry = iter->second;
+         std::string neighborNum = iter->first;
+         checkNeighborTableEntry(neighborNum, neighborEntry.neighborAddr, neighborEntry.interfaceAddr);
+         PRINT_LOG(std::endl<<"\t"<<neighborNum <<"\t\t"<< neighborEntry.neighborAddr <<"\t\t"<< neighborEntry.interfaceAddr<<std::endl);
+         }
+  /* NOTE: For purpose of autograding, you should invoke the following function for each
+  neighbor table entry. The output format is indicated by parameter name and type.
+  */
+  //  checkNeighborTableEntry();
 }
 
 void DVRoutingProtocol::DumpRoutingTable()
@@ -380,43 +388,12 @@ void DVRoutingProtocol::DumpRoutingTable()
              << "**************** Route Table ********************" << std::endl
              << "DestNumber\t\tDestAddr\t\tNextHopNumber\t\tNextHopAddr\t\tInterfaceAddr\t\tCost");
 
-  PRINT_LOG(""); //blank line to match output
-  
-  /*std::vector<RoutingTableEntry> routes = Snapshot();
-  PRINT_LOG(routes.size()); // Print number of routes
-  for (const auto& entry : routes) {
-    PRINT_LOG(ReverseLookup(entry.dest) << "\t\t\t"
-               << entry.dest << "\t\t"
-               << ReverseLookup(entry.nextHop) << "\t\t\t"
-               << entry.nextHop << "\t\t"
-               << entry.interface << "\t\t"
-               << entry.cost);
+  PRINT_LOG("");
 
-  // NOTE: For purpose of autograding, you should invoke the following function for each
-  // routing table entry. The output format is indicated by parameter name and type.
+  /* NOTE: For purpose of autograding, you should invoke the following function for each
+  routing table entry. The output format is indicated by parameter name and type.
+  */
   //  checkRouteTableEntry();
-
-      checkRouteTableEntry(ReverseLookup(entry.dest), entry.dest, 
-          strtoul(ReverseLookup(entry.nextHop).c_str(), NULL, 10), entry.nextHop, entry.interface, entry.cost);
-  }*/
-
-  PRINT_LOG(m_routingTable.size()); // Print number of routes
-  for (auto it = m_routingTable.begin(); it != m_routingTable.end(); ++it) {
-      const auto& entry = it->second;
-      PRINT_LOG(ReverseLookup(entry.dest) << "\t\t\t"
-                << entry.dest << "\t\t"
-                << ReverseLookup(entry.nextHop) << "\t\t\t"
-                << entry.nextHop << "\t\t"
-                << entry.interface << "\t\t"
-                << entry.cost);
-
-  //NOTE: For purpose of autograding, you should invoke the following function for each
-  //routing table entry. The output format is indicated by parameter name and type.
-  //  checkRouteTableEntry();
-
-      checkRouteTableEntry(ReverseLookup(entry.dest), entry.dest, 
-          strtoul(ReverseLookup(entry.nextHop).c_str(), NULL, 10), entry.nextHop, entry.interface, entry.cost);
-  }
 }
 
 void DVRoutingProtocol::RecvDVMessage(Ptr<Socket> socket)
@@ -461,44 +438,12 @@ void DVRoutingProtocol::RecvDVMessage(Ptr<Socket> socket)
     ProcessHelloReq(dvMessage);
     break;
   case DVMessage::HELLO_RSP:
-    ProcessHelloRsp(dvMessage, interface);
+    ProcessHelloRsp(dvMessage,interface);
     break;
-  case DVMessage::DV_UPDATE: // MS2 part 2 related
-   /* MS2 Part 2 will process */
-   ProcessDvUpdate(dvMessage, interface);
-   break;  
   default:
     ERROR_LOG("Unknown Message Type!");
     break;
   }
-}
-
-// Oliver: Handle and respond to hello_req messages received from a neighbor
-void DVRoutingProtocol::ProcessHelloReq(DVMessage dvMessage)
-{
-  // Use reverse lookup for ease of debug
-  std::string fromNode = ReverseLookup(dvMessage.GetOriginatorAddress());
-  TRAFFIC_LOG("Received HELLO_REQ, From Node: " << fromNode << ", Message: " << dvMessage.GetHelloReq().helloMessage);
-  // Send Hello Response
-  DVMessage dvResp = DVMessage(DVMessage::HELLO_RSP, dvMessage.GetSequenceNumber(), 1, m_mainAddress);
-  dvResp.SetHelloRsp(dvMessage.GetOriginatorAddress(), dvMessage.GetHelloReq().helloMessage);
-  Ptr<Packet> packet = Create<Packet>();
-  packet->AddHeader(dvResp);
-  BroadcastPacket(packet);
-}
-
-// Oliver: Handle to hello_rsp messages received from a neighbor and update neighbor table accordingly
-void DVRoutingProtocol::ProcessHelloRsp(DVMessage dvMessage, Ipv4Address localInterfaceAddress)
-{
-  // Extract information for neighbor table entry
-  Ipv4Address neighborAddress = dvMessage.GetOriginatorAddress();
-  // Add to Neighbor Table
-  m_neighbors.ObserveHello(neighborAddress, localInterfaceAddress);
-
-  // Logging
-  std::string fromNode = ReverseLookup(neighborAddress);
-  TRAFFIC_LOG("Received HELLO_RSP, From Node: " << fromNode << ", Message: " << dvMessage.GetHelloRsp().helloMessage)
-  DEBUG_LOG("Received HELLO_RSP, From: " << neighborAddress << " on Interface: " << localInterfaceAddress);
 }
 
 void DVRoutingProtocol::ProcessPingReq(DVMessage dvMessage)
@@ -539,6 +484,55 @@ void DVRoutingProtocol::ProcessPingRsp(DVMessage dvMessage)
   }
 }
 
+void DVRoutingProtocol::ProcessHelloReq(DVMessage dvMessage)
+{
+  // Check destination address
+
+    // Use reverse lookup for ease of debug
+    std::string fromNode = ReverseLookup(dvMessage.GetOriginatorAddress());
+    
+    // Send HELLO Response
+    DVMessage dvResp = DVMessage(DVMessage::HELLO_RSP, dvMessage.GetSequenceNumber(), 1, m_mainAddress);
+    dvResp.SetHelloRsp(dvMessage.GetOriginatorAddress(), dvMessage.GetHelloReq().helloMessage);
+    Ptr<Packet> packet = Create<Packet>();
+    packet->AddHeader(dvResp);
+    BroadcastPacket(packet);
+}
+
+void DVRoutingProtocol::ProcessHelloRsp(DVMessage dvMessage,Ipv4Address interface)
+{
+  // Check destination address
+  if (IsOwnAddress(dvMessage.GetHelloRsp().destinationAddress))
+  {
+    // check if it is a new neighbor
+    std::map<std::string, NeighborTableEntry>::iterator iter;
+    std::string fromNode = ReverseLookup(dvMessage.GetOriginatorAddress());
+
+    iter = m_neighbors.find(fromNode);
+    if (iter != m_neighbors.end())
+    {
+      iter->second.timestamp = Simulator::Now().GetMilliSeconds();
+
+      //TODO HERE
+    }
+    else
+    {      
+      struct NeighborTableEntry neighborEntry;
+      neighborEntry.neighborAddr = dvMessage.GetOriginatorAddress();
+      neighborEntry.interfaceAddr = interface;
+      neighborEntry.timestamp = Simulator::Now().GetMilliSeconds();
+      m_neighbors.insert(std::make_pair(fromNode,neighborEntry));
+    }
+      
+      //TODO HERE
+      //
+      //
+    }
+}
+
+
+
+
 bool DVRoutingProtocol::IsOwnAddress(Ipv4Address originatorAddress)
 {
   // Check all interfaces
@@ -553,21 +547,6 @@ bool DVRoutingProtocol::IsOwnAddress(Ipv4Address originatorAddress)
   return false;
 }
 
-// Oliver: Handle periodic broadcasting of hello_req and checking neighborhood table for expired entries
-void DVRoutingProtocol::AuditHellos()
-{
-  // Send Periodic HelloReq
-  DVMessage dvReq = DVMessage(DVMessage::HELLO_RSP, 0, 1, m_mainAddress);
-  dvReq.SetHelloReq("Hello!");
-  Ptr<Packet> packet = Create<Packet>();
-  packet->AddHeader(dvReq);
-  BroadcastPacket(packet);
-
-  //Audit Neighbor Table
-  m_neighbors.Audit();
-  DEBUG_LOG("Audited Neighbor Table at: " << m_mainAddress << ", Current size: " << m_neighbors.Size());
-}
-
 void DVRoutingProtocol::AuditPings()
 {
   std::map<uint32_t, Ptr<PingRequest>>::iterator iter;
@@ -577,7 +556,6 @@ void DVRoutingProtocol::AuditPings()
     if (pingRequest->GetTimestamp().GetMilliSeconds() + m_pingTimeout.GetMilliSeconds() <= Simulator::Now().GetMilliSeconds())
     {
       DEBUG_LOG("Ping expired. Message: " << pingRequest->GetPingMessage() << " Timestamp: " << pingRequest->GetTimestamp().GetMilliSeconds() << " CurrentTime: " << Simulator::Now().GetMilliSeconds());
-
       // Remove stale entries
       m_pingTracker.erase(iter++);
     }
@@ -621,78 +599,7 @@ void DVRoutingProtocol::SetIpv4(Ptr<Ipv4> ipv4)
   NS_LOG_DEBUG("Created dv::RoutingProtocol");
   // Configure timers
   m_auditPingsTimer.SetFunction(&DVRoutingProtocol::AuditPings, this);
+  m_helloTimer.SetFunction(&DVRoutingProtocol::HelloBroadcastPacket, this);
   m_ipv4 = ipv4;
   m_staticRouting->SetIpv4(m_ipv4);
-}
-
-/* ---------------- MS2 related (Part 1) ---------------- */
-
-// Build and send a DV_UPDATE on all interfaces.
-// Part 1: the advertised vector is minimal (only self route with cost=0).
-// Part 2 will replace this with real DV routes + split horizon/poison reverse.
-void DVRoutingProtocol::SendPeriodicUpdate()
-{
-  // Minimal vector: advertise reachability to self with cost 0.
-  std::vector<DVMessage::DvVectorItem> vec;
-  vec.push_back({ m_mainAddress, 0 });
-
-  DVMessage msg(DVMessage::DV_UPDATE, GetNextSequenceNumber(), m_maxTTL, m_mainAddress);
-  msg.SetDvUpdate(vec); // MS2 related: attach the DV vector payload (currently only self, cost=0)
-
-  for (const auto& kv : m_socketAddresses)
-  {
-    Ptr<Socket> sock = kv.first;
-    const Ipv4InterfaceAddress& ifAddr = kv.second;
-    Ptr<Packet> p = Create<Packet>();
-    p->AddHeader(msg);
-    Ipv4Address bcast = ifAddr.GetLocal().GetSubnetDirectedBroadcast(ifAddr.GetMask());
-    sock->SendTo(p, 0, InetSocketAddress(bcast, DV_PORT_NUMBER));
-  }
-  // Re-schedule periodic
-  m_periodicUpdateTimer.Cancel();
-  m_periodicUpdateTimer.Schedule(m_periodicInterval);  // MS2 related: keep the periodic DV_UPDATE cadence running
-}
-
-// Coalesce triggered updates; schedule a send soon (reuses periodic sender)
-void DVRoutingProtocol::TriggerUpdateSoon()
-{
-  if (m_triggeredUpdateTimer.IsRunning()) return;
-  m_triggeredUpdateTimer.Schedule(m_triggerHold);      // MS2 related: defer briefly so multiple changes collapse into one update
-}
-
-uint32_t DVRoutingProtocol::UpdateRoute(Ipv4Address dest, Ipv4Address source, Ipv4Address sourceInterface, uint32_t sourceCost) {
-  // Invalid route: If neighbor's route has been invalidated 
-  if (m_routingTable.count(dest) == 0) {
-
-    /* ------ WHEN THIS SECTION IS COMMENTED OUT THEN NO SIGIOT IS RECEIVED ------*/
-    RoutingTableEntry &e = m_routingTable[dest];
-      e.dest = dest;
-      e.nextHop = source;
-      e.interface = sourceInterface;
-      e.cost = sourceCost + 1;
-      e.timestamp = Simulator::Now();
-    /* -------------------------------------------------------------------------- */
-
-      return ROUTE_UPDATED;
-  } else {
-    return ROUTE_NOT_UPDATED;
-  }
-}
-
-void DVRoutingProtocol::ProcessDvUpdate(DVMessage dvMessage, Ipv4Address sourceInterface) {
-  //Process message and retrieve information from packet
-  Ipv4Address neighbor = dvMessage.GetOriginatorAddress();
-  DEBUG_LOG("Received DV_UPDATE, From: " << neighbor);
-  bool updated = false;
-  for (const auto& entry : dvMessage.GetDvUpdate().vec) {
-    if (entry.dest == m_mainAddress) continue;
-    if (UpdateRoute(entry.dest, neighbor, sourceInterface, entry.cost)
-          == ROUTE_UPDATED) {
-            updated = true;
-          }
-  }
-  if (updated) {
-    TriggerUpdateSoon();
-    DEBUG_LOG("Triggered DV update due to routing change(s)");
-  }
 }
