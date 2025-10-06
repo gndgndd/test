@@ -1,19 +1,4 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
-
 #ifndef DV_MESSAGE_H
 #define DV_MESSAGE_H
 
@@ -22,8 +7,8 @@
 #include "ns3/packet.h"
 #include "ns3/object.h"
 #include <string>
-#include <vector>   // MS2 related: needed for DV vector payload (list of {dest,cost} entries)
-#include <cstdint>  // MS2 related: defines fixed-width integer types like uint32_t for cost
+#include <vector>
+#include <cstdint>
 
 using namespace ns3;
 
@@ -31,212 +16,113 @@ using namespace ns3;
 
 class DVMessage : public Header
 {
-  public:
-    DVMessage ();
-    virtual ~DVMessage ();
+public:
+  DVMessage();
+  ~DVMessage() override;
 
+  enum MessageType {
+    PING_REQ = 1,
+    PING_RSP = 2,
+    HELLO_REQ,
+    HELLO_RSP,
+    DV_UPDATE        // advertises vector of {dest,cost}
+  };
 
-    enum MessageType
-      {
-        PING_REQ = 1,
-        PING_RSP = 2,
-        // Define extra message types when needed
-        HELLO_REQ,    // New type for neighbor discovery HELLO messages
-        HELLO_RSP,    // New type for HELLO reply messages
-        DV_UPDATE     // MS2 related: new type that advertises this node's distance-vector (routing) entries
-                     //  used for periodic + triggered DV advertisements
-      };
+  DVMessage (MessageType type, uint32_t seq, uint8_t ttl, Ipv4Address origin);
 
-    DVMessage (DVMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
+  // common header fields
+  void         SetMessageType (MessageType t);
+  MessageType  GetMessageType () const;
+  void         SetSequenceNumber (uint32_t s);
+  uint32_t     GetSequenceNumber () const;
+  void         SetOriginatorAddress (Ipv4Address a);
+  Ipv4Address  GetOriginatorAddress () const;
+  void         SetTTL (uint8_t ttl);
+  uint8_t      GetTTL () const;
 
-    /**
-    *  \brief Sets message type
-    *  \param messageType message type
-    */
-    void SetMessageType (MessageType messageType);
+  // ns-3 Header plumbing
+  static TypeId GetTypeId (void);
+  TypeId GetInstanceTypeId (void) const override;
+  void Print (std::ostream &os) const override;
+  uint32_t GetSerializedSize () const override;
+  void Serialize (Buffer::Iterator start) const override;
+  uint32_t Deserialize (Buffer::Iterator start) override;
 
-    /**
-     *  \returns message type
-     */
-    MessageType GetMessageType () const;
-
-    /**
-     *  \brief Sets Sequence Number
-     *  \param sequenceNumber Sequence Number of the request
-     */
-    void SetSequenceNumber (uint32_t sequenceNumber);
-
-    /**
-     *  \returns Sequence Number
-     */
-    uint32_t GetSequenceNumber () const;
-
-    /**
-     *  \brief Sets Originator IP Address
-     *  \param originatorAddress Originator IPV4 address
-     */
-    void SetOriginatorAddress (Ipv4Address originatorAddress);
-
-    /**
-     *  \returns Originator IPV4 address
-     */
-    Ipv4Address GetOriginatorAddress () const;
-
-    /**
-     *  \brief Sets Time To Live of the message
-     *  \param ttl TTL of the message
-     */
-    void SetTTL (uint8_t ttl);
-
-    /**
-     *  \returns TTL of the message
-     */
-    uint8_t GetTTL () const;
-
-  private:
-    /**
-     *  \cond
-     */
-    MessageType m_messageType;
-    uint32_t m_sequenceNumber;
-    Ipv4Address m_originatorAddress;
-    uint8_t m_ttl;
-    /**
-     *  \endcond
-     */
-  public:
-    static TypeId GetTypeId (void);
-    virtual TypeId GetInstanceTypeId (void) const;
+  // payload types
+  struct HelloReq {
     void Print (std::ostream &os) const;
-    uint32_t GetSerializedSize (void) const;
-    void Serialize (Buffer::Iterator start) const;
-    uint32_t Deserialize (Buffer::Iterator start);
+    uint32_t GetSerializedSize () const;
+    void Serialize (Buffer::Iterator &start) const;
+    uint32_t Deserialize (Buffer::Iterator &start);
+    std::string helloMessage;
+  };
 
-    struct HelloReq
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // Payload
-        std::string helloMessage;
-      };
+  struct HelloRsp {
+    void Print (std::ostream &os) const;
+    uint32_t GetSerializedSize () const;
+    void Serialize (Buffer::Iterator &start) const;
+    uint32_t Deserialize (Buffer::Iterator &start);
+    Ipv4Address sourceAddress;
+    std::string helloMessage;
+  };
 
-    struct HelloRsp
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // Payload
-        Ipv4Address sourceAddress; // The address of the node sending the reply
-        std::string helloMessage;
-      };
+  struct PingReq {
+    void Print (std::ostream &os) const;
+    uint32_t GetSerializedSize () const;
+    void Serialize (Buffer::Iterator &start) const;
+    uint32_t Deserialize (Buffer::Iterator &start);
+    Ipv4Address destinationAddress;
+    std::string pingMessage;
+  };
 
-    struct PingReq
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // Payload
-        Ipv4Address destinationAddress;
-        std::string pingMessage;
-      };
+  struct PingRsp {
+    void Print (std::ostream &os) const;
+    uint32_t GetSerializedSize () const;
+    void Serialize (Buffer::Iterator &start) const;
+    uint32_t Deserialize (Buffer::Iterator &start);
+    Ipv4Address destinationAddress;
+    std::string pingMessage;
+  };
 
-    struct PingRsp
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // Payload
-        Ipv4Address destinationAddress;
-        std::string pingMessage;
-      };
+  // MS2 DV payloads
+  struct DvVectorItem { Ipv4Address dest; uint32_t cost; };
+  struct DvUpdate {
+    void Print (std::ostream &os) const;
+    uint32_t GetSerializedSize () const;
+    void Serialize (Buffer::Iterator &start) const;
+    uint32_t Deserialize (Buffer::Iterator &start);
+    std::vector<DvVectorItem> vec;
+  };
 
-      /** ---------- MS2 payloads ---------- */
- struct DvVectorItem                      // MS2 related: one DV entry (advertised route)
- {                                        // contains the destination and hop-count cost
-   Ipv4Address dest;   // destination
-   uint32_t    cost;   // hop-count / metric
- };
+  // payload accessors/mutators
+  HelloReq GetHelloReq();
+  void     SetHelloReq(std::string hello);
+  HelloRsp GetHelloRsp();
+  void     SetHelloRsp(Ipv4Address sourceAddress, std::string hello);
 
- struct DvUpdate                          // MS2 related: message body for DV_UPDATE; a list of DV entries
- {
-   void Print (std::ostream &os) const;   // MS2 related: pretty-print the advertised vector for logging
-   uint32_t GetSerializedSize (void) const; // MS2 related: compute bytes needed to serialize the vector
-   void Serialize (Buffer::Iterator &start) const;  // MS2 related: write vector items to the packet buffer
-   uint32_t Deserialize (Buffer::Iterator &start);  // MS2 related: read vector items from the packet buffer
-   std::vector<DvVectorItem> vec;         // MS2 related: the advertised distance-vector (dest,cost pairs)
- };
+  PingReq  GetPingReq();
+  void     SetPingReq (Ipv4Address dst, std::string msg);
+  PingRsp  GetPingRsp();
+  void     SetPingRsp (Ipv4Address dst, std::string msg);
 
-  private:
-    struct
-      {
-        PingReq pingReq;
-        PingRsp pingRsp;
-        HelloReq helloReq;   // New member for HELLO_REQ messages
-        HelloRsp helloRsp;   // New member for HELLO_RSP messages
-        DvUpdate  dvUpdate;    // MS2 related: carries the DV vector for DV_UPDATE messages
-                              //  this is the payload your timers will serialize & send
-      } m_message;
+  DvUpdate GetDvUpdate() const;
+  void     SetDvUpdate(const std::vector<DvVectorItem>& items);
 
-  public:
-      /**
-     * \returns Hello Struct
-     */
-    HelloReq GetHelloReq();
+private:
+  MessageType m_messageType{PING_REQ};
+  uint32_t    m_sequenceNumber{0};
+  Ipv4Address m_originatorAddress;
+  uint8_t     m_ttl{1};
 
-    /**
-     * \brief Sets Hello message params
-     */
-    void SetHelloReq(std::string helloMessage);
+  struct {
+    PingReq  pingReq;
+    PingRsp  pingRsp;
+    HelloReq helloReq;
+    HelloRsp helloRsp;
+    DvUpdate dvUpdate;
+  } m_message;
+};
 
-    /**
-     * \returns HelloRsp Struct
-     */
-    HelloRsp GetHelloRsp();
-
-    /**
-     * \brief Sets HelloRsp message params
-     * \param senderAddress The address of the node sending the reply
-     */
-    void SetHelloRsp(Ipv4Address sourceAddress, std::string helloMessage);
-
-    /**
-     *  \returns PingReq Struct
-     */
-    PingReq GetPingReq ();
-
-    /**
-     *  \brief Sets PingReq message params
-     *  \param message Payload String
-     */
-
-    void SetPingReq (Ipv4Address destinationAddress, std::string message);
-
-    /**
-     * \returns PingRsp Struct
-     */
-    PingRsp GetPingRsp ();
-    /**
-     *  \brief Sets PingRsp message params
-     *  \param message Payload String
-     */
-    void SetPingRsp (Ipv4Address destinationAddress, std::string message);
-
-    /** ---------- MS2 accessors ---------- */
-    DvUpdate GetDvUpdate() const;                                   // MS2 related: expose the vector for processing/logging
-    void SetDvUpdate(const std::vector<DvVectorItem>& items);       // MS2 related: set the vector before (periodic/triggered) send
-
-}; // class DVMessage
-
-
-static inline std::ostream& operator<< (std::ostream& os, const DVMessage& message)
-{
-message.Print (os);
-return os;
-}
+static inline std::ostream& operator<<(std::ostream& os, const DVMessage& m) { m.Print(os); return os; }
 
 #endif
