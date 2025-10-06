@@ -51,3 +51,15 @@ DVRoutingHelper::Set (std::string name, const AttributeValue &value)
   m_dvFactory.Set (name, value);
 }
 
+
+
+DVRoutingHelper& DVRoutingHelper::WithLsLikeIntervals(Time advert, Time hold, Time maintenance) {
+  Set("AdvertInterval", TimeValue(advert));
+  Set("TriggerHoldDown", TimeValue(hold));
+  Set("MaintenanceInterval", TimeValue(maintenance));
+  return *this;
+}
+DVRoutingHelper& DVRoutingHelper::WithPingTimeout(Time t) {
+  Set("PingTimeout", TimeValue(t));
+  return *this;
+}
