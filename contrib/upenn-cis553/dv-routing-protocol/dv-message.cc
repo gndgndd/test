@@ -184,13 +184,10 @@ DVMessage::Deserialize (Buffer::Iterator start)
 
 /* HELLO_REQ */
 
-uint32_t
-DVMessage::HelloReq::GetSerializedSize (void) const
-{
-  uint32_t size;
-  size = IPV4_ADDRESS_SIZE + sizeof(uint16_t) + helloMessage.length();
-  return size;
+uint32_t DVMessage::HelloReq::GetSerializedSize() const {
+  return sizeof(uint16_t) + helloMessage.length();
 }
+
 
 void
 DVMessage::HelloReq::Print (std::ostream &os) const
