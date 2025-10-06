@@ -1,503 +1,164 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
-
 #include "ns3/dv-message.h"
 #include "ns3/log.h"
+#include "wire-io.hpp"
+#include <algorithm>
 
 using namespace ns3;
+using namespace wire;
 
-NS_LOG_COMPONENT_DEFINE ("DVMessage");
-NS_OBJECT_ENSURE_REGISTERED (DVMessage);
+NS_LOG_COMPONENT_DEFINE("DVMessage");
+NS_OBJECT_ENSURE_REGISTERED(DVMessage);
 
-DVMessage::DVMessage ()
+DVMessage::DVMessage() = default;
+DVMessage::~DVMessage() = default;
+
+DVMessage::DVMessage (DVMessage::MessageType t, uint32_t seq, uint8_t ttl, Ipv4Address origin)
+  : m_messageType(t), m_sequenceNumber(seq), m_originatorAddress(origin), m_ttl(ttl) {}
+
+TypeId DVMessage::GetTypeId (void)
 {
-}
-
-DVMessage::~DVMessage ()
-{
-}
-
-DVMessage::DVMessage (DVMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress)
-{
-  m_messageType = messageType;
-  m_sequenceNumber = sequenceNumber;
-  m_ttl = ttl;
-  m_originatorAddress = originatorAddress;
-}
-
-TypeId
-DVMessage::GetTypeId (void)
-{
-  static TypeId tid = TypeId ("DVMessage")
-    .SetParent<Header> ()
-    .AddConstructor<DVMessage> ()
-  ;
+  static TypeId tid = TypeId("DVMessage").SetParent<Header>().AddConstructor<DVMessage>();
   return tid;
 }
 
-TypeId
-DVMessage::GetInstanceTypeId (void) const
+TypeId DVMessage::GetInstanceTypeId () const { return GetTypeId(); }
+
+void DVMessage::SetMessageType (MessageType t) { m_messageType = t; }
+DVMessage::MessageType DVMessage::GetMessageType () const { return m_messageType; }
+void DVMessage::SetSequenceNumber (uint32_t s) { m_sequenceNumber = s; }
+uint32_t DVMessage::GetSequenceNumber () const { return m_sequenceNumber; }
+void DVMessage::SetOriginatorAddress (Ipv4Address a) { m_originatorAddress = a; }
+Ipv4Address DVMessage::GetOriginatorAddress () const { return m_originatorAddress; }
+void DVMessage::SetTTL (uint8_t t) { m_ttl = t; }
+uint8_t DVMessage::GetTTL () const { return m_ttl; }
+
+uint32_t DVMessage::GetSerializedSize () const
 {
-  return GetTypeId ();
+  uint32_t sz = sizeof(uint8_t) + sizeof(uint32_t) + IPV4_ADDRESS_SIZE + sizeof(uint8_t);
+  switch (m_messageType) {
+    case PING_REQ:  sz += m_message.pingReq.GetSerializedSize();  break;
+    case PING_RSP:  sz += m_message.pingRsp.GetSerializedSize();  break;
+    case HELLO_REQ: sz += m_message.helloReq.GetSerializedSize(); break;
+    case HELLO_RSP: sz += m_message.helloRsp.GetSerializedSize(); break;
+    case DV_UPDATE: sz += m_message.dvUpdate.GetSerializedSize(); break;
+    default: NS_ASSERT(false);
+  }
+  return sz;
 }
 
-
-uint32_t
-DVMessage::GetSerializedSize (void) const
+void DVMessage::Print (std::ostream &os) const
 {
-  // size of messageType, sequence number, originator address, ttl
-  uint32_t size = sizeof (uint8_t) + sizeof (uint32_t) + IPV4_ADDRESS_SIZE + sizeof (uint8_t);
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        size += m_message.pingReq.GetSerializedSize ();
-        break;
-      case PING_RSP:
-        size += m_message.pingRsp.GetSerializedSize ();
-        break;
-      case HELLO_REQ: // new case for HELLO_REQ
-        size += m_message.helloReq.GetSerializedSize ();
-        break;
-      case HELLO_RSP: // new case for HELLO_RSP
-        size += m_message.helloRsp.GetSerializedSize ();
-        break;
-      case DV_UPDATE:                                // MS2 related
-        size += m_message.dvUpdate.GetSerializedSize (); // MS2 related: add bytes needed for the DV vector payload
-        break;
-      default:
-        NS_ASSERT (false);
-    }
-  return size;
-}
-
-void
-DVMessage::Print (std::ostream &os) const
-{
-  os << "\n****DVMessage Dump****\n" ;
-  os << "messageType: " << m_messageType << "\n";
-  os << "sequenceNumber: " << m_sequenceNumber << "\n";
-  os << "ttl: " << m_ttl << "\n";
-  os << "originatorAddress: " << m_originatorAddress << "\n";
-  os << "PAYLOAD:: \n";
-
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        m_message.pingReq.Print (os);
-        break;
-      case PING_RSP:
-        m_message.pingRsp.Print (os);
-        break;
-      case HELLO_REQ:
-        m_message.helloReq.Print (os);
-        break;
-      case HELLO_RSP:
-        m_message.helloRsp.Print (os);
-        break;
-      case DV_UPDATE:                            // MS2 related
-        m_message.dvUpdate.Print (os);           // MS2 related: print the advertised (dest,cost) tuples
-        break;
-      default:
-        break;
-    }
-  os << "\n****END OF MESSAGE****\n";
-}
-
-void
-DVMessage::Serialize (Buffer::Iterator start) const
-{
-  Buffer::Iterator i = start;
-  i.WriteU8 (m_messageType);
-  i.WriteHtonU32 (m_sequenceNumber);
-  i.WriteU8 (m_ttl);
-  i.WriteHtonU32 (m_originatorAddress.Get ());
-
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        m_message.pingReq.Serialize (i);
-        break;
-      case PING_RSP:
-        m_message.pingRsp.Serialize (i);
-        break;
-      case HELLO_REQ:
-        m_message.helloReq.Serialize (i);
-        break;
-      case HELLO_RSP:
-        m_message.helloRsp.Serialize (i);
-        break;
-      case DV_UPDATE:                       // MS2 related
-        m_message.dvUpdate.Serialize (i);   // MS2 related: write the count and all (dest,cost) items
-        break;
-      default:
-        NS_ASSERT (false);
-    }
-}
-
-uint32_t
-DVMessage::Deserialize (Buffer::Iterator start)
-{
-  uint32_t size;
-  Buffer::Iterator i = start;
-  m_messageType = (MessageType) i.ReadU8 ();
-  m_sequenceNumber = i.ReadNtohU32 ();
-  m_ttl = i.ReadU8 ();
-  m_originatorAddress = Ipv4Address (i.ReadNtohU32 ());
-
-  size = sizeof (uint8_t) + sizeof (uint32_t) + sizeof (uint8_t) + IPV4_ADDRESS_SIZE;
-
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        size += m_message.pingReq.Deserialize (i);
-        break;
-      case PING_RSP:
-        size += m_message.pingRsp.Deserialize (i);
-        break;
-      case HELLO_REQ:
-        size += m_message.helloReq.Deserialize (i);
-        break;
-      case HELLO_RSP:
-        size += m_message.helloRsp.Deserialize (i);
-        break;
-      case DV_UPDATE:                          // MS2 related
-        size += m_message.dvUpdate.Deserialize (i); // MS2 related: read and stash the advertised vector
-        break;
-      default:
-        NS_ASSERT (false);
-    }
-  return size;
-}
-
-/* HELLO_REQ */
-
-uint32_t
-DVMessage::HelloReq::GetSerializedSize (void) const
-{
-  uint32_t size;
-  size = IPV4_ADDRESS_SIZE + sizeof(uint16_t) + helloMessage.length();
-  return size;
-}
-
-void
-DVMessage::HelloReq::Print (std::ostream &os) const
-{
-  os << "HelloReq:: Message: " << helloMessage << "\n";
-}
-
-void
-DVMessage::HelloReq::Serialize (Buffer::Iterator &start) const
-{
-  //start.WriteHtonU32 (destinationAddress.Get ());
-  start.WriteU16 (helloMessage.length ());
-  start.Write ((uint8_t *) (const_cast<char*> (helloMessage.c_str())), helloMessage.length());
-}
-
-uint32_t
-DVMessage::HelloReq::Deserialize (Buffer::Iterator &start)
-{
-  //destinationAddress = Ipv4Address (start.ReadNtohU32 ());
-  uint16_t length = start.ReadU16 ();
-  char* str = (char*) malloc (length);
-  start.Read ((uint8_t*)str, length);
-  helloMessage = std::string (str, length);
-  free (str);
-  return HelloReq::GetSerializedSize ();
-}
-
-void
-DVMessage::SetHelloReq (std::string helloMessage)
-{
-  m_messageType = HELLO_REQ;
-  m_message.helloReq.helloMessage = helloMessage;
-}
-
-DVMessage::HelloReq
-DVMessage::GetHelloReq ()
-{
-  return m_message.helloReq;
-}
-
-/* HELLO_RSP */
-
-uint32_t
-DVMessage::HelloRsp::GetSerializedSize (void) const
-{
-  uint32_t size;
-  size = IPV4_ADDRESS_SIZE + sizeof(uint16_t) + helloMessage.length();
-  return size;
-}
-
-void
-DVMessage::HelloRsp::Print (std::ostream &os) const
-{
-  os << "HelloReq:: Message: " << helloMessage << "\n";
-}
-
-void
-DVMessage::HelloRsp::Serialize (Buffer::Iterator &start) const
-{
-  start.WriteHtonU32 (sourceAddress.Get ());
-  start.WriteU16 (helloMessage.length ());
-  start.Write ((uint8_t *) (const_cast<char*> (helloMessage.c_str())), helloMessage.length());
-}
-
-uint32_t
-DVMessage::HelloRsp::Deserialize (Buffer::Iterator &start)
-{
-  sourceAddress = Ipv4Address (start.ReadNtohU32 ());
-  uint16_t length = start.ReadU16 ();
-  char* str = (char*) malloc (length);
-  start.Read ((uint8_t*)str, length);
-  helloMessage = std::string (str, length);
-  free (str);
-  return HelloRsp::GetSerializedSize ();
-}
-
-void
-DVMessage::SetHelloRsp (Ipv4Address sourceAddress, std::string helloMessage)
-{
-  m_messageType = HELLO_RSP;
-  m_message.helloRsp.sourceAddress = sourceAddress;
-  m_message.helloRsp.helloMessage = helloMessage;
-}
-
-DVMessage::HelloRsp
-DVMessage::GetHelloRsp ()
-{
-  return m_message.helloRsp;
-}
-
-/* PING_REQ */
-
-uint32_t
-DVMessage::PingReq::GetSerializedSize (void) const
-{
-  uint32_t size;
-  size = IPV4_ADDRESS_SIZE + sizeof(uint16_t) + pingMessage.length();
-  return size;
-}
-
-void
-DVMessage::PingReq::Print (std::ostream &os) const
-{
-  os << "PingReq:: Message: " << pingMessage << "\n";
-}
-
-void
-DVMessage::PingReq::Serialize (Buffer::Iterator &start) const
-{
-  start.WriteHtonU32 (destinationAddress.Get ());
-  start.WriteU16 (pingMessage.length ());
-  start.Write ((uint8_t *) (const_cast<char*> (pingMessage.c_str())), pingMessage.length());
-}
-
-uint32_t
-DVMessage::PingReq::Deserialize (Buffer::Iterator &start)
-{
-  destinationAddress = Ipv4Address (start.ReadNtohU32 ());
-  uint16_t length = start.ReadU16 ();
-  char* str = (char*) malloc (length);
-  start.Read ((uint8_t*)str, length);
-  pingMessage = std::string (str, length);
-  free (str);
-  return PingReq::GetSerializedSize ();
-}
-
-void
-DVMessage::SetPingReq (Ipv4Address destinationAddress, std::string pingMessage)
-{
-  if (m_messageType == 0)
-    {
-      m_messageType = PING_REQ;
-    }
-  else
-    {
-      NS_ASSERT (m_messageType == PING_REQ);
-    }
-  m_message.pingReq.destinationAddress = destinationAddress;
-  m_message.pingReq.pingMessage = pingMessage;
-}
-
-DVMessage::PingReq
-DVMessage::GetPingReq ()
-{
-  return m_message.pingReq;
-}
-
-/* PING_RSP */
-
-uint32_t
-DVMessage::PingRsp::GetSerializedSize (void) const
-{
-  uint32_t size;
-  size = IPV4_ADDRESS_SIZE + sizeof(uint16_t) + pingMessage.length();
-  return size;
-}
-
-void
-DVMessage::PingRsp::Print (std::ostream &os) const
-{
-  os << "PingReq:: Message: " << pingMessage << "\n";
-}
-
-void
-DVMessage::PingRsp::Serialize (Buffer::Iterator &start) const
-{
-  start.WriteHtonU32 (destinationAddress.Get ());
-  start.WriteU16 (pingMessage.length ());
-  start.Write ((uint8_t *) (const_cast<char*> (pingMessage.c_str())), pingMessage.length());
-}
-
-uint32_t
-DVMessage::PingRsp::Deserialize (Buffer::Iterator &start)
-{
-  destinationAddress = Ipv4Address (start.ReadNtohU32 ());
-  uint16_t length = start.ReadU16 ();
-  char* str = (char*) malloc (length);
-  start.Read ((uint8_t*)str, length);
-  pingMessage = std::string (str, length);
-  free (str);
-  return PingRsp::GetSerializedSize ();
-}
-
-void
-DVMessage::SetPingRsp (Ipv4Address destinationAddress, std::string pingMessage)
-{
-  if (m_messageType == 0)
-    {
-      m_messageType = PING_RSP;
-    }
-  else
-    {
-      NS_ASSERT (m_messageType == PING_RSP);
-    }
-  m_message.pingRsp.destinationAddress = destinationAddress;
-  m_message.pingRsp.pingMessage = pingMessage;
-}
-
-DVMessage::PingRsp
-DVMessage::GetPingRsp ()
-{
-  return m_message.pingRsp;
-}
-
-
-/* ---------- MS2: DV_UPDATE payload implementation ---------- */
-
-void
-DVMessage::DvUpdate::Print (std::ostream &os) const
-{
-  os << "DvUpdate:: items=" << vec.size() << "\n";
-  for (const auto& it : vec)
-    os << "  dest=" << it.dest << " cost=" << it.cost << "\n";
-}
-
-uint32_t
-DVMessage::DvUpdate::GetSerializedSize (void) const
-{
-  // count (u16) + N * (dest u32 + cost u32)
-  return sizeof(uint16_t) + vec.size() * (IPV4_ADDRESS_SIZE + sizeof(uint32_t));
-}
-
-void
-DVMessage::DvUpdate::Serialize (Buffer::Iterator &start) const
-{
-  start.WriteU16 (static_cast<uint16_t>(vec.size()));
-  for (const auto& it : vec)
-  {
-    start.WriteHtonU32 (it.dest.Get());
-    start.WriteHtonU32 (it.cost);
+  os << "\n[DVMessage] type=" << m_messageType
+     << " seq=" << m_sequenceNumber
+     << " ttl=" << unsigned(m_ttl)
+     << " origin=" << m_originatorAddress << "\n  payload:\n";
+  switch (m_messageType) {
+    case PING_REQ:  m_message.pingReq.Print(os);  break;
+    case PING_RSP:  m_message.pingRsp.Print(os);  break;
+    case HELLO_REQ: m_message.helloReq.Print(os); break;
+    case HELLO_RSP: m_message.helloRsp.Print(os); break;
+    case DV_UPDATE: m_message.dvUpdate.Print(os); break;
+    default: break;
   }
 }
 
-uint32_t
-DVMessage::DvUpdate::Deserialize (Buffer::Iterator &start)
+void DVMessage::Serialize (Buffer::Iterator i) const
 {
-  uint16_t n = start.ReadU16();
-  vec.clear();
-  vec.reserve(n);
-  for (uint16_t i=0; i<n; ++i)
-  {
+  i.WriteU8 (m_messageType);
+  i.WriteHtonU32 (m_sequenceNumber);
+  i.WriteU8 (m_ttl);
+  WriteIpv4(i, m_originatorAddress);
+
+  switch (m_messageType) {
+    case PING_REQ:  m_message.pingReq.Serialize(i);  break;
+    case PING_RSP:  m_message.pingRsp.Serialize(i);  break;
+    case HELLO_REQ: m_message.helloReq.Serialize(i); break;
+    case HELLO_RSP: m_message.helloRsp.Serialize(i); break;
+    case DV_UPDATE: m_message.dvUpdate.Serialize(i); break;
+    default: NS_ASSERT(false);
+  }
+}
+
+uint32_t DVMessage::Deserialize (Buffer::Iterator i)
+{
+  m_messageType = static_cast<MessageType>(i.ReadU8());
+  m_sequenceNumber = i.ReadNtohU32();
+  m_ttl = i.ReadU8();
+  m_originatorAddress = ReadIpv4(i);
+
+  uint32_t sz = sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint8_t) + IPV4_ADDRESS_SIZE;
+  switch (m_messageType) {
+    case PING_REQ:  sz += m_message.pingReq.Deserialize(i);  break;
+    case PING_RSP:  sz += m_message.pingRsp.Deserialize(i);  break;
+    case HELLO_REQ: sz += m_message.helloReq.Deserialize(i); break;
+    case HELLO_RSP: sz += m_message.helloRsp.Deserialize(i); break;
+    case DV_UPDATE: sz += m_message.dvUpdate.Deserialize(i); break;
+    default: NS_ASSERT(false);
+  }
+  return sz;
+}
+
+/* HelloReq */
+uint32_t DVMessage::HelloReq::GetSerializedSize() const { return sizeof(uint16_t) + helloMessage.size(); }
+void DVMessage::HelloReq::Print (std::ostream &os) const { os << "    HelloReq msg=\"" << helloMessage << "\"\n"; }
+void DVMessage::HelloReq::Serialize (Buffer::Iterator &it) const { WriteU16String(it, helloMessage); }
+uint32_t DVMessage::HelloReq::Deserialize (Buffer::Iterator &it) { helloMessage = ReadU16String(it); return GetSerializedSize(); }
+
+/* HelloRsp */
+uint32_t DVMessage::HelloRsp::GetSerializedSize () const { return IPV4_ADDRESS_SIZE + sizeof(uint16_t) + helloMessage.size(); }
+void DVMessage::HelloRsp::Print (std::ostream &os) const { os << "    HelloRsp from=" << sourceAddress << " msg=\"" << helloMessage << "\"\n"; }
+void DVMessage::HelloRsp::Serialize (Buffer::Iterator &it) const { WriteIpv4(it, sourceAddress); WriteU16String(it, helloMessage); }
+uint32_t DVMessage::HelloRsp::Deserialize (Buffer::Iterator &it) { sourceAddress = ReadIpv4(it); helloMessage = ReadU16String(it); return GetSerializedSize(); }
+
+/* PingReq */
+uint32_t DVMessage::PingReq::GetSerializedSize () const { return IPV4_ADDRESS_SIZE + sizeof(uint16_t) + pingMessage.size(); }
+void DVMessage::PingReq::Print (std::ostream &os) const { os << "    PingReq dst=" << destinationAddress << " msg=\"" << pingMessage << "\"\n"; }
+void DVMessage::PingReq::Serialize (Buffer::Iterator &it) const { WriteIpv4(it, destinationAddress); WriteU16String(it, pingMessage); }
+uint32_t DVMessage::PingReq::Deserialize (Buffer::Iterator &it) { destinationAddress = ReadIpv4(it); pingMessage = ReadU16String(it); return GetSerializedSize(); }
+
+/* PingRsp */
+uint32_t DVMessage::PingRsp::GetSerializedSize () const { return IPV4_ADDRESS_SIZE + sizeof(uint16_t) + pingMessage.size(); }
+void DVMessage::PingRsp::Print (std::ostream &os) const { os << "    PingRsp dst=" << destinationAddress << " msg=\"" << pingMessage << "\"\n"; }
+void DVMessage::PingRsp::Serialize (Buffer::Iterator &it) const { WriteIpv4(it, destinationAddress); WriteU16String(it, pingMessage); }
+uint32_t DVMessage::PingRsp::Deserialize (Buffer::Iterator &it) { destinationAddress = ReadIpv4(it); pingMessage = ReadU16String(it); return GetSerializedSize(); }
+
+/* DV update */
+void DVMessage::DvUpdate::Print (std::ostream &os) const {
+  os << "    DV items=" << vec.size() << "\n";
+  for (const auto &e : vec) os << "      dest=" << e.dest << " cost=" << e.cost << "\n";
+}
+uint32_t DVMessage::DvUpdate::GetSerializedSize () const {
+  return sizeof(uint16_t) + vec.size() * (IPV4_ADDRESS_SIZE + sizeof(uint32_t));
+}
+void DVMessage::DvUpdate::Serialize (Buffer::Iterator &it) const {
+  WriteCountU16(it, static_cast<uint16_t>(vec.size()));
+  for (const auto &e : vec) { WriteIpv4(it, e.dest); it.WriteHtonU32(e.cost); }
+}
+uint32_t DVMessage::DvUpdate::Deserialize (Buffer::Iterator &it) {
+  uint16_t n = ReadCountU16(it);
+  vec.clear(); vec.reserve(n);
+  for (uint16_t i=0;i<n;++i) {
     DvVectorItem item;
-    item.dest = Ipv4Address(start.ReadNtohU32());
-    item.cost = start.ReadNtohU32();
+    item.dest = ReadIpv4(it);
+    item.cost = it.ReadNtohU32();
     vec.push_back(item);
   }
   return GetSerializedSize();
 }
 
-DVMessage::DvUpdate
-DVMessage::GetDvUpdate() const
-{
-  return m_message.dvUpdate;               // MS2 related: expose parsed vector to DV processing logic
-}
+/* accessors/mutators */
+DVMessage::HelloReq DVMessage::GetHelloReq(){ return m_message.helloReq; }
+void DVMessage::SetHelloReq(std::string hello){ m_messageType = HELLO_REQ; m_message.helloReq.helloMessage = std::move(hello); }
 
-void
-DVMessage::SetDvUpdate(const std::vector<DvVectorItem>& items)
-{
-  m_messageType = DV_UPDATE;               // MS2 related: mark packet type as DV_UPDATE
-  m_message.dvUpdate.vec = items;          // MS2 related: stash advertised entries for Serialize()
-}
+DVMessage::HelloRsp DVMessage::GetHelloRsp(){ return m_message.helloRsp; }
+void DVMessage::SetHelloRsp(Ipv4Address src, std::string hello){ m_messageType = HELLO_RSP; m_message.helloRsp.sourceAddress = src; m_message.helloRsp.helloMessage = std::move(hello); }
 
-/* ---------- common header fields ---------- */
-void
-DVMessage::SetMessageType (MessageType messageType)
-{
-  m_messageType = messageType;
-}
+DVMessage::PingReq DVMessage::GetPingReq (){ return m_message.pingReq; }
+void DVMessage::SetPingReq (Ipv4Address dst, std::string msg){ if(m_messageType==0) m_messageType=PING_REQ; else NS_ASSERT(m_messageType==PING_REQ); m_message.pingReq.destinationAddress=dst; m_message.pingReq.pingMessage=std::move(msg); }
 
-DVMessage::MessageType
-DVMessage::GetMessageType () const
-{
-  return m_messageType;
-}
+DVMessage::PingRsp DVMessage::GetPingRsp (){ return m_message.pingRsp; }
+void DVMessage::SetPingRsp (Ipv4Address dst, std::string msg){ if(m_messageType==0) m_messageType=PING_RSP; else NS_ASSERT(m_messageType==PING_RSP); m_message.pingRsp.destinationAddress=dst; m_message.pingRsp.pingMessage=std::move(msg); }
 
-void
-DVMessage::SetSequenceNumber (uint32_t sequenceNumber)
-{
-  m_sequenceNumber = sequenceNumber;
-}
-
-uint32_t
-DVMessage::GetSequenceNumber (void) const
-{
-  return m_sequenceNumber;
-}
-
-void
-DVMessage::SetTTL (uint8_t ttl)
-{
-  m_ttl = ttl;
-}
-
-uint8_t
-DVMessage::GetTTL (void) const
-{
-  return m_ttl;
-}
-
-void
-DVMessage::SetOriginatorAddress (Ipv4Address originatorAddress)
-{
-  m_originatorAddress = originatorAddress;
-}
-
-Ipv4Address
-DVMessage::GetOriginatorAddress (void) const
-{
-  return m_originatorAddress;
-}
+DVMessage::DvUpdate DVMessage::GetDvUpdate() const { return m_message.dvUpdate; }
+void DVMessage::SetDvUpdate(const std::vector<DvVectorItem>& items){ m_messageType = DV_UPDATE; m_message.dvUpdate.vec = items; }
