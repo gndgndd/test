@@ -16,142 +16,133 @@
 #include "ns3/penn-routing-protocol.h"
 #include "ns3/ping-request.h"
 
+#include <vector>
+#include <map>
+
 #include "ns3/neighbor-table.h"
 #include "ns3/neighbor-timers.h"
 
-#include <vector>
-#include <map>
-#include <set>
-
 using namespace ns3;
 
-// Route table entry mirrors LS style
+/** Route row kept by DV */
 struct DvRouteRow
 {
-  Ipv4Address dest;
-  Ipv4Address nextHop;
-  Ipv4Address oif;
-  uint32_t    cost;
-  Time        timestamp;
+  Ipv4Address dest;       // destination
+  Ipv4Address nextHop;    // selected next hop
+  Ipv4Address oif;        // outgoing interface
+  uint32_t    cost;       // hop-count metric (or INVALID)
+  Time        timestamp;  // last update
 };
 
 class DVRoutingProtocol : public PennRoutingProtocol
 {
 public:
-  static TypeId GetTypeId(void);
+  static TypeId GetTypeId (void);
 
   DVRoutingProtocol();
-  virtual ~DVRoutingProtocol();
+  ~DVRoutingProtocol() override;
 
-  // CLI / commands
-  virtual void ProcessCommand(std::vector<std::string> tokens);
+  // Scenario/CLI
+  void ProcessCommand(std::vector<std::string> tokens) override;
 
-  // Setup
-  virtual void SetMainInterface(uint32_t mainInterface);
-  virtual void SetNodeAddressMap(std::map<uint32_t, Ipv4Address> nodeAddressMap);
-  virtual void SetAddressNodeMap(std::map<Ipv4Address, uint32_t> addressNodeMap);
+  // Node wiring
+  void SetMainInterface(uint32_t mainInterface) override;
+  void SetNodeAddressMap(std::map<uint32_t, Ipv4Address> nodeAddressMap) override;
+  void SetAddressNodeMap(std::map<Ipv4Address, uint32_t> addressNodeMap) override;
 
-  // Control-plane RX
+  // Control-plane receive path
   void RecvDVMessage(Ptr<Socket> socket);
   void ProcessPingReq(DVMessage msg);
   void ProcessPingRsp(DVMessage msg);
 
-  // Maintenance
+  // Neighbor maintenance (hello audit + ping audit)
   void AuditPings();
-  void AuditHellos(); // LS-style hello driver
+  void AuditHellos();
 
-  // MS2 routing ops
-  uint32_t UpdateRoute(Ipv4Address dest, Ipv4Address via, Ipv4Address viaIf, uint32_t viaCost);
+  // DV update logic (Part 2)
+  uint32_t UpdateRoute(Ipv4Address dst, Ipv4Address via, Ipv4Address viaIf, uint32_t viaCost);
   void     CheckNeighborLoss();
   void     ProcessDvUpdate(DVMessage msg, Ipv4Address localIf);
+
+  // Snapshot for safe iteration/printing
   std::vector<DvRouteRow> Snapshot() const;
 
-  // Ipv4RoutingProtocol
-  virtual void PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit unit = Time::S) const;
-  virtual Ptr<Ipv4Route> RouteOutput(Ptr<Packet> p, const Ipv4Header &header, Ptr<NetDevice> oif, Socket::SocketErrno &sockerr);
-  virtual bool RouteInput(Ptr<const Packet> p, const Ipv4Header &header, Ptr<const NetDevice> idev,
-                          UnicastForwardCallback ucb, MulticastForwardCallback mcb,
-                          LocalDeliverCallback lcb, ErrorCallback ecb);
-  virtual void NotifyInterfaceUp(uint32_t interface);
-  virtual void NotifyInterfaceDown(uint32_t interface);
-  virtual void NotifyAddAddress(uint32_t interface, Ipv4InterfaceAddress address);
-  virtual void NotifyRemoveAddress(uint32_t interface, Ipv4InterfaceAddress address);
-  virtual void SetIpv4(Ptr<Ipv4> ipv4);
+  // Ipv4RoutingProtocol overrides
+  void PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit unit = Time::S) const override;
+  Ptr<Ipv4Route> RouteOutput(Ptr<Packet> p, const Ipv4Header &header, Ptr<NetDevice> oif, Socket::SocketErrno &sockerr) override;
+  bool RouteInput(Ptr<const Packet> p, const Ipv4Header &header, Ptr<const NetDevice> idev,
+                  UnicastForwardCallback ucb, MulticastForwardCallback mcb,
+                  LocalDeliverCallback lcb, ErrorCallback ecb) override;
 
-  void DoDispose();
+  void NotifyInterfaceUp(uint32_t interface) override;
+  void NotifyInterfaceDown(uint32_t interface) override;
+  void NotifyAddAddress(uint32_t interface, Ipv4InterfaceAddress address) override;
+  void NotifyRemoveAddress(uint32_t interface, Ipv4InterfaceAddress address) override;
+  void SetIpv4(Ptr<Ipv4> ipv4) override;
+
+  void DoDispose() override;
 
 protected:
-  virtual void DoInitialize(void);
+  void DoInitialize(void) override;
   uint32_t GetNextSequenceNumber();
-  bool IsOwnAddress(Ipv4Address originatorAddress);
+  bool IsOwnAddress(Ipv4Address ip) ;
 
 private:
   // I/O helpers
   void BroadcastPacket(Ptr<Packet> packet);
-  Ipv4Address ResolveNodeIpAddress(uint32_t nodeNumber);
-  std::string ReverseLookup(Ipv4Address ipv4Address);
+  Ipv4Address ResolveNodeIpAddress(uint32_t nodeNumber) override;
+  std::string ReverseLookup(Ipv4Address ipv4Address) override;
 
-  // Status
+  // dumps
   void DumpNeighbors();
   void DumpRoutingTable();
 
-  // Hello helpers
+  // neighbor hello handlers
   void ProcessHelloReq(DVMessage msg);
   void ProcessHelloRsp(DVMessage msg, Ipv4Address localIf);
 
-  // DV update helpers
+  // DV advertisements (periodic & triggered)
   void SendPeriodicUpdate();
   void TriggerUpdateSoon();
 
-  // ——— State ———
-  std::map<Ptr<Socket>, Ipv4InterfaceAddress> m_socketAddresses;
-  Ptr<Socket> m_recvSocket {nullptr};
-  Ipv4Address m_mainAddress;
-  Ptr<Ipv4StaticRouting> m_staticRouting;
-  Ptr<Ipv4> m_ipv4 {nullptr};
+private:
+  // sockets per-interface and shared RX
+  std::map<Ptr<Socket>, Ipv4InterfaceAddress> m_sockIf;
+  Ptr<Socket>  m_rxSock{nullptr};
+
+  // basics
+  Ipv4Address             m_mainAddress;
+  Ptr<Ipv4StaticRouting>  m_staticRouting;
+  Ptr<Ipv4>               m_ipv4{nullptr};
 
   // attributes
-  Time     m_pingTimeout;
-  uint8_t  m_maxTTL {16};
-  uint16_t m_dvPort {5000};
-  uint32_t m_currentSequenceNumber {0};
+  Time      m_pingTimeout;
+  uint8_t   m_maxTTL{16};
+  uint16_t  m_dvPort{5000};
+  uint32_t  m_seq{0};
 
-  std::map<uint32_t, Ipv4Address> m_nodeAddressMap;
-  std::map<Ipv4Address, uint32_t> m_addressNodeMap;
+  // topo id maps
+  std::map<uint32_t, Ipv4Address>  m_nodeToAddr;
+  std::map<Ipv4Address, uint32_t>  m_addrToNode;
 
   // timers
   Timer m_auditPingsTimer;
-  Timer m_periodicAdv;     // periodic DV_UPDATE
-  Timer m_burstAdv;        // triggered (coalesced) DV_UPDATE
-  Timer m_helloDriver;     // LS-style hello tick
+  Timer m_helloDriver;                 // driven by NeighborTimers
+  // Part 1/2 DV timers
+  Timer m_periodicAdv;                 // periodic DV advertise
+  Timer m_burstAdv;                    // coalesced triggered advertise
+  Time  m_periodicEvery{Seconds(2.0)};
+  Time  m_burstHold{MilliSeconds(300)};
 
-  // knobs
-  Time m_periodicEvery { Seconds(2.0) };
-  Time m_burstHold     { MilliSeconds(300) };
-  bool m_poisonReverse { true }; // optional LS-like toggle
-  double m_jitterPct   { 0.1 };  // +-10% jitter on periodic
-
-  // neighbor infra
-  NeighborTable m_neighbors;
-  Ptr<NeighborTimers> m_neighborTimers;
-
-  // DV route table
-  std::map<Ipv4Address, DvRouteRow> m_routes;
-
-  // ping tracker
+  // trackers
   std::map<uint32_t, Ptr<PingRequest>> m_pingTracker;
 
-  // duplicate filter for control-plane (origin, seq) -> seen
-  std::set<std::pair<Ipv4Address,uint32_t>> m_seenUpdates;
+  // neighbors + timers
+  NeighborTable            m_neighbors;
+  Ptr<NeighborTimers>      m_neighborTimers;
 
-  // sockets map shorthand used by code that previously referenced m_recvSocket
-  std::map<Ptr<Socket>, Ipv4InterfaceAddress> m_sockIf;
-
-  // RX socket for wire port
-  Ptr<Socket> m_rxSock {nullptr};
-
-  // seq
-  uint32_t m_seq {0};
+  // DV routing table
+  std::map<Ipv4Address, DvRouteRow> m_routes;
 };
 
 #endif
