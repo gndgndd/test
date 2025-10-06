@@ -112,8 +112,8 @@ uint32_t DVMessage::HelloReq::Deserialize (Buffer::Iterator &it)
   helloMessage = s;
   return GetSerializedSize();
 }
-DVMessage::HelloReq DVMessage::GetHelloReq () { return m_message.helloReq; }
 void DVMessage::SetHelloReq (std::string hello) { m_messageType = HELLO_REQ; m_message.helloReq.helloMessage = std::move(hello); }
+DVMessage::HelloReq DVMessage::GetHelloReq () { return m_message.helloReq; }
 
 /* ---- HELLO_RSP ---- */
 uint32_t DVMessage::HelloRsp::GetSerializedSize () const { return IPV4_ADDRESS_SIZE + sizeof(uint16_t) + helloMessage.length(); }
@@ -133,8 +133,8 @@ uint32_t DVMessage::HelloRsp::Deserialize (Buffer::Iterator &it)
   helloMessage = s;
   return GetSerializedSize();
 }
-DVMessage::HelloRsp DVMessage::GetHelloRsp () { return m_message.helloRsp; }
 void DVMessage::SetHelloRsp (Ipv4Address src, std::string hello) { m_messageType = HELLO_RSP; m_message.helloRsp.sourceAddress = src; m_message.helloRsp.helloMessage = std::move(hello); }
+DVMessage::HelloRsp DVMessage::GetHelloRsp () { return m_message.helloRsp; }
 
 /* ---- PING_REQ ---- */
 uint32_t DVMessage::PingReq::GetSerializedSize () const { return IPV4_ADDRESS_SIZE + sizeof(uint16_t) + pingMessage.length(); }
@@ -154,8 +154,8 @@ uint32_t DVMessage::PingReq::Deserialize (Buffer::Iterator &it)
   pingMessage = s;
   return GetSerializedSize();
 }
-DVMessage::PingReq DVMessage::GetPingReq () { return m_message.pingReq; }
 void DVMessage::SetPingReq (Ipv4Address dst, std::string msg) { if (m_messageType == 0) m_messageType = PING_REQ; else NS_ASSERT(m_messageType == PING_REQ); m_message.pingReq.destinationAddress = dst; m_message.pingReq.pingMessage = std::move(msg); }
+DVMessage::PingReq DVMessage::GetPingReq () { return m_message.pingReq; }
 
 /* ---- PING_RSP ---- */
 uint32_t DVMessage::PingRsp::GetSerializedSize () const { return IPV4_ADDRESS_SIZE + sizeof(uint16_t) + pingMessage.length(); }
@@ -175,8 +175,8 @@ uint32_t DVMessage::PingRsp::Deserialize (Buffer::Iterator &it)
   pingMessage = s;
   return GetSerializedSize();
 }
-DVMessage::PingRsp DVMessage::GetPingRsp () { return m_message.pingRsp; }
 void DVMessage::SetPingRsp (Ipv4Address dst, std::string msg) { if (m_messageType == 0) m_messageType = PING_RSP; else NS_ASSERT(m_messageType == PING_RSP); m_message.pingRsp.destinationAddress = dst; m_message.pingRsp.pingMessage = std::move(msg); }
+DVMessage::PingRsp DVMessage::GetPingRsp () { return m_message.pingRsp; }
 
 /* ---- DV_UPDATE payload ---- */
 void DVMessage::DvUpdate::Print (std::ostream &os) const
