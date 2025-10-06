@@ -21,6 +21,7 @@
 #include "ns3/ipv4-address.h"
 #include "ns3/packet.h"
 #include "ns3/object.h"
+#include <map>
 
 using namespace ns3;
 
@@ -33,15 +34,38 @@ class DVMessage : public Header
     virtual ~DVMessage ();
 
 
-    enum MessageType
-      {
-        PING_REQ = 1,
-        PING_RSP = 2,
-        HELLO_REQ,
-        HELLO_RSP,
-        // Define extra message types when needed       
-      };
+    enum MessageType {
+      PING_REQ = 1,
+      PING_RSP = 2,
+      // Define extra message types when needed     
+      DV_ADVERT = 3, //  New message type for DV advertisements
+      HELLO = 4,
+    };
 
+    // Add a struct for DV advertisements
+    struct DVAdvert {
+      std::map<uint32_t, uint16_t> distanceVector; // <DestinationNodeNumber, Cost>
+      // Payload
+      // Ipv4Address destinationAddress;
+
+      uint32_t GetSerializedSize() const;
+      void Print(std::ostream &os) const;
+      void Serialize(Buffer::Iterator &start) const;
+      uint32_t Deserialize(Buffer::Iterator &start);
+    };
+
+    struct Hello {
+      std::string helloMessage;
+      // Payload
+      // Ipv4Address destinationAddress;
+
+      uint32_t GetSerializedSize() const;
+      void Print(std::ostream &os) const;
+      void Serialize(Buffer::Iterator &start) const;
+      uint32_t Deserialize(Buffer::Iterator &start);
+    };
+    
+    // Constructor for DVMessage
     DVMessage (DVMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
 
     /**
@@ -130,36 +154,15 @@ class DVMessage : public Header
         std::string pingMessage;
       };
 
-    struct HelloReq
-      {
-      void Print(std::ostream& os) const;
-      uint32_t GetSerializedSize(void) const;
-      void Serialize(Buffer::Iterator& start) const;
-      uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
-      Ipv4Address destinationAddress;
-      std::string helloMessage;
-      };
-
-    struct HelloRsp
-      {
-      void Print(std::ostream& os) const;
-      uint32_t GetSerializedSize(void) const;
-      void Serialize(Buffer::Iterator& start) const;
-      uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
-      Ipv4Address destinationAddress;
-      std::string helloMessage;
-      };
 
   private:
     struct
-      {
-        PingReq pingReq;
-        PingRsp pingRsp;
-        HelloReq helloReq;
-        HelloRsp helloRsp;
-      } m_message;
+    {
+      PingReq pingReq;
+      PingRsp pingRsp;
+      DVAdvert dvAdvert;
+      Hello hello;
+    } m_message;
     
   public:
     /**
@@ -184,24 +187,19 @@ class DVMessage : public Header
      */
     void SetPingRsp (Ipv4Address destinationAddress, std::string message);
 
-    HelloReq GetHelloReq();
+    /**
+     *  \returns DVAdvert Struct
+     */
+    DVAdvert GetDVAdvert ();
 
     /**
-     *  \brief Sets PingReq message params
-     *  \param message Payload String
      */
+    void SetDVAdvert (std::map<uint32_t, uint16_t> distanceVector);
 
-    void SetHelloReq(std::string message);
+    Hello GetHello ();
 
-    /**
-     * \returns PingRsp Struct
-     */
-    HelloRsp GetHelloRsp();
-    /**
-     *  \brief Sets PingRsp message params
-     *  \param message Payload String
-     */
-    void SetHelloRsp(Ipv4Address destinationAddress, std::string message);
+    void SetHello (std::string helloMessage);
+
 
 }; // class DVMessage
 
