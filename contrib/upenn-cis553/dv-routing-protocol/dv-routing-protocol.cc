@@ -566,8 +566,9 @@ bool DVRoutingProtocol::IsOwnAddress(Ipv4Address originatorAddress)
 void DVRoutingProtocol::AuditHellos()
 {
   // Send Periodic HelloReq
-  DVMessage dvReq = DVMessage(DVMessage::HELLO_RSP, 0, 1, m_mainAddress);
+  DVMessage dvReq = DVMessage(DVMessage::HELLO_REQ, GetNextSequenceNumber(), 1, m_mainAddress);
   dvReq.SetHelloReq("Hello!");
+
   Ptr<Packet> packet = Create<Packet>();
   packet->AddHeader(dvReq);
   BroadcastPacket(packet);
@@ -740,6 +741,7 @@ void DVRoutingProtocol::ProcessDvUpdate(DVMessage dvMessage, Ipv4Address sourceI
   bool updated = false;
   for (const auto& entry : dvMessage.GetDvUpdate().vec) {
     if (entry.dest == m_mainAddress) continue;
+
     if (UpdateRoute(entry.dest, neighbor, sourceInterface, entry.cost)
           == ROUTE_UPDATED) {
             updated = true;
