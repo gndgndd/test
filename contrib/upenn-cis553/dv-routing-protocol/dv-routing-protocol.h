@@ -34,252 +34,262 @@
 #include <vector>
 #include <map>
 
+#include "ns3/neighbor-table.h"
+#include "ns3/neighbor-timers.h"
+
 using namespace ns3;
+
+// ---------------- MS2 Routing Table (Part 2) ----------------
+struct RoutingTableEntry
+{
+   Ipv4Address dest;
+   Ipv4Address nextHop;
+   Ipv4Address interface;
+   uint32_t cost;
+   Time timestamp;
+};
 
 class DVRoutingProtocol : public PennRoutingProtocol
 {
 public:
-   static TypeId GetTypeId(void);
+  static TypeId GetTypeId(void);
 
-   DVRoutingProtocol();
-   virtual ~DVRoutingProtocol();
-   /**
-       * \brief Process command issued from the scenario file or interactively issued from keyboard.
-       *
-       * This method is called by the simulator-main whenever a command is issued to this module.
-       *
-       * \param tokens String tokens for processing.
-       */
+  DVRoutingProtocol();
+  virtual ~DVRoutingProtocol();
+  /**
+     * \brief Process command issued from the scenario file or interactively issued from keyboard.
+     *
+     * This method is called by the simulator-main whenever a command is issued to this module.
+     *
+     * \param tokens String tokens for processing.
+     */
 
-   virtual void ProcessCommand(std::vector<std::string> tokens);
-   /**
-       * \brief Set the main interface of a node.
-       *
-       * This method is called by the simulator-main when this node is created.
-       *
-       * \param mainInterface Interface Index.
-       */
-   virtual void SetMainInterface(uint32_t mainInterface);
-   /**
-       * \brief Save the mapping from Inet topology node numbers to main addresses.
-       *
-       * This method is called by the simulator-main when this node is created.
-       *
-       * \param nodeAddressMap Mapping.
-       */
+  virtual void ProcessCommand(std::vector<std::string> tokens);
+  /**
+     * \brief Set the main interface of a node.
+     *
+     * This method is called by the simulator-main when this node is created.
+     *
+     * \param mainInterface Interface Index.
+     */
+  virtual void SetMainInterface(uint32_t mainInterface);
+  /**
+     * \brief Save the mapping from Inet topology node numbers to main addresses.
+     *
+     * This method is called by the simulator-main when this node is created.
+     *
+     * \param nodeAddressMap Mapping.
+     */
 
-   virtual void SetNodeAddressMap(std::map<uint32_t, Ipv4Address> nodeAddressMap);
-   /**
-       * \brief Save the mapping from IP addresses to Inet topology node numbers.
-       *
-       * This method is called by the simulator-main when this node is created.
-       *
-       * \param addressNodeMap Mapping.
-       */
+  virtual void SetNodeAddressMap(std::map<uint32_t, Ipv4Address> nodeAddressMap);
+  /**
+     * \brief Save the mapping from IP addresses to Inet topology node numbers.
+     *
+     * This method is called by the simulator-main when this node is created.
+     *
+     * \param addressNodeMap Mapping.
+     */
 
-   virtual void SetAddressNodeMap(std::map<Ipv4Address, uint32_t> addressNodeMap);
+  virtual void SetAddressNodeMap(std::map<Ipv4Address, uint32_t> addressNodeMap);
 
-   // Message Handling
-   /**
-    * \brief Data Receive Callback function for UDP control plane sockets.
-    *
-    * \param socket Socket on which data is received.
-   */
+  // Message Handling
+  /**
+     * \brief Data Receive Callback function for UDP control plane sockets.
+     *
+     * \param socket Socket on which data is received.
+     */
 
-   void RecvDVMessage(Ptr<Socket> socket);
-   void ProcessPingReq(DVMessage DVMessage);
-   void ProcessPingRsp(DVMessage DVMessage);
+  void RecvDVMessage(Ptr<Socket> socket);
+  void ProcessPingReq(DVMessage DVMessage);
+  void ProcessPingRsp(DVMessage DVMessage);
 
-   // Periodic Audit
-   void AuditPings();
+  // Periodic Audit
+  void AuditPings();
+  void AuditHellos();
 
-   // From Ipv4RoutingProtocol
+   // ---------------- MS2 Routing Table (Part 2) ----------------
+   // Insert or update routing table entry based on incoming route information
+   uint32_t UpdateRoute(Ipv4Address dest, Ipv4Address source, Ipv4Address sourceInterface, uint32_t cost);
 
-   /**
-    * \brief Print the Routing Table entries
-    *
-    * \param stream The ostream the Routing table is printed to
-    * \param unit The time unit to be used in the report
-    */
-   virtual void PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit unit = Time::S) const;
-   /**
-    * \brief Query routing cache for an existing route, for an outbound packet
-    *
-    * This lookup is used by transport protocols.  It does not cause any
-    * packet to be forwarded, and is synchronous.  Can be used for
-    * multicast or unicast.  The Linux equivalent is ip_route_output()
-    *
-    * \param p packet to be routed.  Note that this method may modify the packet.
-    *          Callers may also pass in a null pointer.
-    * \param header input parameter (used to form key to search for the route)
-    * \param oif Output interface Netdevice.  May be zero, or may be bound via
-    *            socket options to a particular output interface.
-    * \param sockerr Output parameter; socket errno
-    *
-    * \returns a code that indicates what happened in the lookup
-    */
-   virtual Ptr<Ipv4Route> RouteOutput(Ptr<Packet> p, const Ipv4Header &header, Ptr<NetDevice> oif, Socket::SocketErrno &sockerr);
-   /**
-    * \brief Route an input packet (to be forwarded or locally delivered)
-    *
-    * This lookup is used in the forwarding process.  The packet is
-    * handed over to the Ipv4RoutingProtocol, and will get forwarded onward
-    * by one of the callbacks.  The Linux equivalent is ip_route_input().
-    * There are four valid outcomes, and a matching callbacks to handle each.
-    *
-    * \param p received packet
-    * \param header input parameter used to form a search key for a route
-    * \param idev Pointer to ingress network device
-    * \param ucb Callback for the case in which the packet is to be forwarded
-    *            as unicast
-    * \param mcb Callback for the case in which the packet is to be forwarded
-    *            as multicast
-    * \param lcb Callback for the case in which the packet is to be locally
-    *            delivered
-    * \param ecb Callback to call if there is an error in forwarding
-    * \returns true if the Ipv4RoutingProtocol takes responsibility for
-    *          forwarding or delivering the packet, false otherwise
-    */
-   virtual bool RouteInput(Ptr<const Packet> p, const Ipv4Header &header, Ptr<const NetDevice> idev,
-                           UnicastForwardCallback ucb, MulticastForwardCallback mcb,
-                           LocalDeliverCallback lcb, ErrorCallback ecb);
-   /**
-    * \param interface the index of the interface we are being notified about
-    *
-    * Protocols are expected to implement this method to be notified of the state change of
-    * an interface in a node.
-    * CIS-553: Skip this implementation.
-    */
-   virtual void NotifyInterfaceUp(uint32_t interface);
-   /**
-    * \param interface the index of the interface we are being notified about
-    *
-    * Protocols are expected to implement this method to be notified of the state change of
-    * an interface in a node.
-    * CIS-553: Skip this implementation.
-    */
-   virtual void NotifyInterfaceDown(uint32_t interface);
-   /**
-    * \param interface the index of the interface we are being notified about
-    * \param address a new address being added to an interface
-    *
-    * Protocols are expected to implement this method to be notified whenever
-    * a new address is added to an interface. Typically used to add a 'network route' on an
-    * interface. Can be invoked on an up or down interface.
-    * CIS-553: Skip this implementation.
-    */
-   virtual void NotifyAddAddress(uint32_t interface, Ipv4InterfaceAddress address);
-   /**
-    * \param interface the index of the interface we are being notified about
-    * \param address a new address being added to an interface
-    *
-    * Protocols are expected to implement this method to be notified whenever
-    * a new address is removed from an interface. Typically used to remove the 'network route' of an
-    * interface. Can be invoked on an up or down interface.
-    * CIS-553: Skip this implementation.
-    */
-   virtual void NotifyRemoveAddress(uint32_t interface, Ipv4InterfaceAddress address);
-   /**
-    * \param ipv4 the ipv4 object this routing protocol is being associated with
-    *
-    * Typically, invoked directly or indirectly from ns3::Ipv4::SetRoutingProtocol
-    */
-   virtual void SetIpv4(Ptr<Ipv4> ipv4);
+   // Checks for loss of neighbors and removes invalid routes from routing table
+   void CheckNeighborLoss();
 
-   void DoDispose();
+   // Processes DV_UPDATE message from neighbor node
+   void ProcessDvUpdate(DVMessage dvMessage, Ipv4Address sourceInterface);
 
-   private:
-   /**
-    * \brief Broadcast a packet on all interfaces.
-    *
-    * \param packet Packet to be sent.
-    */
-   void BroadcastPacket(Ptr<Packet> packet);
-   /**
-    * \brief Returns the main IP address of a node in Inet topology.
-    *
-    * Useful when using commands like PING etc.
-    *
-    * \param nodeNumber Node Number as in Inet topology.
-    */
-   virtual Ipv4Address ResolveNodeIpAddress(uint32_t nodeNumber);
-   /**
-    * \brief Returns the node number which is using the specified IP.
-    *
-    * Useful when printing out debugging messages etc.
-    *
-    * \param ipv4Address IP address of node.
-    */
+   // Return a copy of the table for safe iteration and printing.
+   std::vector<RoutingTableEntry> Snapshot() const;
 
-   virtual std::string ReverseLookup(Ipv4Address ipv4Address);
+  // From Ipv4RoutingProtocol
 
-   // DV Advertise
-   void AuditNeighbors();
-   void ProvessDVAdvert(DVMessage DVMessage);
-   Ptr<Socket> FindSocketForInterface(Ipv4Address interfaceAddr);
-   void UpdateRoutingTable();
-   void ScheduleTriggeredUpdate();
-   void SendDVAdvertisements();
-   void ProcessDVAdvert(DVMessage dvMessage);
-   void BroadcastHello();
-   void ProcessHello(DVMessage dvMessage, Ipv4Address interfaceAddr);
+  /**
+     * \brief Print the Routing Table entries
+     *
+     * \param stream The ostream the Routing table is printed to
+     * \param unit The time unit to be used in the report
+     */
+  virtual void PrintRoutingTable(Ptr<OutputStreamWrapper> stream, Time::Unit unit = Time::S) const;
+  /**
+     * \brief Query routing cache for an existing route, for an outbound packet
+     *
+     * This lookup is used by transport protocols.  It does not cause any
+     * packet to be forwarded, and is synchronous.  Can be used for
+     * multicast or unicast.  The Linux equivalent is ip_route_output()
+     *
+     * \param p packet to be routed.  Note that this method may modify the packet.
+     *          Callers may also pass in a null pointer.
+     * \param header input parameter (used to form key to search for the route)
+     * \param oif Output interface Netdevice.  May be zero, or may be bound via
+     *            socket options to a particular output interface.
+     * \param sockerr Output parameter; socket errno
+     *
+     * \returns a code that indicates what happened in the lookup
+     */
+  virtual Ptr<Ipv4Route> RouteOutput(Ptr<Packet> p, const Ipv4Header &header, Ptr<NetDevice> oif, Socket::SocketErrno &sockerr);
+  /**
+     * \brief Route an input packet (to be forwarded or locally delivered)
+     *
+     * This lookup is used in the forwarding process.  The packet is
+     * handed over to the Ipv4RoutingProtocol, and will get forwarded onward
+     * by one of the callbacks.  The Linux equivalent is ip_route_input().
+     * There are four valid outcomes, and a matching callbacks to handle each.
+     *
+     * \param p received packet
+     * \param header input parameter used to form a search key for a route
+     * \param idev Pointer to ingress network device
+     * \param ucb Callback for the case in which the packet is to be forwarded
+     *            as unicast
+     * \param mcb Callback for the case in which the packet is to be forwarded
+     *            as multicast
+     * \param lcb Callback for the case in which the packet is to be locally
+     *            delivered
+     * \param ecb Callback to call if there is an error in forwarding
+     * \returns true if the Ipv4RoutingProtocol takes responsibility for
+     *          forwarding or delivering the packet, false otherwise
+     */
+  virtual bool RouteInput(Ptr<const Packet> p, const Ipv4Header &header, Ptr<const NetDevice> idev,
+                          UnicastForwardCallback ucb, MulticastForwardCallback mcb,
+                          LocalDeliverCallback lcb, ErrorCallback ecb);
+  /**
+     * \param interface the index of the interface we are being notified about
+     *
+     * Protocols are expected to implement this method to be notified of the state change of
+     * an interface in a node.
+     * CIS-553: Skip this implementation.
+     */
+  virtual void NotifyInterfaceUp(uint32_t interface);
+  /**
+     * \param interface the index of the interface we are being notified about
+     *
+     * Protocols are expected to implement this method to be notified of the state change of
+     * an interface in a node.
+     * CIS-553: Skip this implementation.
+     */
+  virtual void NotifyInterfaceDown(uint32_t interface);
+  /**
+     * \param interface the index of the interface we are being notified about
+     * \param address a new address being added to an interface
+     *
+     * Protocols are expected to implement this method to be notified whenever
+     * a new address is added to an interface. Typically used to add a 'network route' on an
+     * interface. Can be invoked on an up or down interface.
+     * CIS-553: Skip this implementation.
+     */
+  virtual void NotifyAddAddress(uint32_t interface, Ipv4InterfaceAddress address);
+  /**
+     * \param interface the index of the interface we are being notified about
+     * \param address a new address being added to an interface
+     *
+     * Protocols are expected to implement this method to be notified whenever
+     * a new address is removed from an interface. Typically used to remove the 'network route' of an
+     * interface. Can be invoked on an up or down interface.
+     * CIS-553: Skip this implementation.
+     */
+  virtual void NotifyRemoveAddress(uint32_t interface, Ipv4InterfaceAddress address);
+  /**
+     * \param ipv4 the ipv4 object this routing protocol is being associated with
+     *
+     * Typically, invoked directly or indirectly from ns3::Ipv4::SetRoutingProtocol
+     */
+  virtual void SetIpv4(Ptr<Ipv4> ipv4);
 
-   // Status
-   void DumpNeighbors();
-   void DumpRoutingTable();
+  void DoDispose();
 
-   protected:
-   virtual void DoInitialize(void);
-   uint32_t GetNextSequenceNumber();
-   /**
-    * \brief Check whether the specified IP is owned by this node.
-    *
-    * \param ipv4Address IP address.
-    */
-   bool IsOwnAddress(Ipv4Address originatorAddress);
+private:
+  /**
+     * \brief Broadcast a packet on all interfaces.
+     *
+     * \param packet Packet to be sent.
+     */
+  void BroadcastPacket(Ptr<Packet> packet);
+  /**
+     * \brief Returns the main IP address of a node in Inet topology.
+     *
+     * Useful when using commands like PING etc.
+     *
+     * \param nodeNumber Node Number as in Inet topology.
+     */
+  virtual Ipv4Address ResolveNodeIpAddress(uint32_t nodeNumber);
+  /**
+     * \brief Returns the node number which is using the specified IP.
+     *
+     * Useful when printing out debugging messages etc.
+     *
+     * \param ipv4Address IP address of node.
+     */
 
-   private:
-   std::map<Ptr<Socket>, Ipv4InterfaceAddress> m_socketAddresses;
-   Ptr<Socket> m_recvSocket; //!< Receiving socket.
-   Ipv4Address m_mainAddress;
-   Ptr<Ipv4StaticRouting> m_staticRouting;
-   Ptr<Ipv4> m_ipv4;
-   Time m_pingTimeout;
-   uint8_t m_maxTTL;
-   uint16_t m_dvPort;
-   uint32_t m_currentSequenceNumber;
-   std::map<uint32_t, Ipv4Address> m_nodeAddressMap;
-   std::map<Ipv4Address, uint32_t> m_addressNodeMap;
-   // Timers
-   Timer m_auditPingsTimer;
-   // Ping tracker
-   std::map<uint32_t, Ptr<PingRequest>> m_pingTracker;
+  virtual std::string ReverseLookup(Ipv4Address ipv4Address);
 
-   void DiscoverNeighbors();
-   struct NeighborEntry {
-      uint32_t neighborNumber;
-      Ipv4Address neighborAddr;
-      Ipv4Address interfaceAddr;
-      Time lastHeard; // Time when last DV was received
-   };
-   std::map<Ipv4Address, NeighborEntry> m_neighborTable;
+  // Status
+  void DumpNeighbors();
+  void DumpRoutingTable();
 
-    Timer m_auditTimer;
-    ns3::Time m_auditInterval;
+  // Neighbor Discovery Helper Functions
+  void ProcessHelloReq(DVMessage dvMessage);
+  void ProcessHelloRsp(DVMessage dvMessage, Ipv4Address localInterfaceAddress);
 
-    Timer m_helloTimer;
-    ns3::Time m_helloInterval;
-    ns3::Time m_helloTimeout;
+  // ---------------- MS2 related (Part 1: messaging + timers) ----------------
+  void SendPeriodicUpdate(); // MS2 related: build & broadcast a DV_UPDATE with current vector (periodic push)
+  void TriggerUpdateSoon();  // MS2 related: coalesce/schedule a near-term DV_UPDATE after changes (rate-limited)
 
-   Timer m_triggerTimer;
-   ns3::Time m_triggerInterval;
-   
-   struct RoutingEntry {
-      Ipv4Address nextHop;
-      uint16_t cost;
-   };
-   
-   std::map<uint32_t, RoutingEntry> m_distanceVector;
+protected:
+  virtual void DoInitialize(void);
+  uint32_t GetNextSequenceNumber();
+  /**
+     * \brief Check whether the specified IP is owned by this node.
+     *
+     * \param ipv4Address IP address.
+     */
+  bool IsOwnAddress(Ipv4Address originatorAddress);
+
+private:
+  std::map<Ptr<Socket>, Ipv4InterfaceAddress> m_socketAddresses;
+  Ptr<Socket> m_recvSocket; //!< Receiving socket.
+  Ipv4Address m_mainAddress;
+  Ptr<Ipv4StaticRouting> m_staticRouting;
+  Ptr<Ipv4> m_ipv4;
+  Time m_pingTimeout;
+  uint8_t m_maxTTL;
+  uint16_t m_dvPort;
+  uint32_t m_currentSequenceNumber;
+  std::map<uint32_t, Ipv4Address> m_nodeAddressMap;
+  std::map<Ipv4Address, uint32_t> m_addressNodeMap;
+  // Timers
+  Timer m_auditPingsTimer;
+  // Ping tracker
+  std::map<uint32_t, Ptr<PingRequest>> m_pingTracker;
+  // Milestone 1: Neighbor table and Neighbor timers
+  NeighborTable m_neighbors;
+  Ptr<NeighborTimers> m_neighborTimers;
+
+  // ---------------- MS2 related timers (Part 1) ----------------
+  Timer m_periodicUpdateTimer;                // MS2 related: fires every m_periodicInterval to send DV_UPDATE
+  Timer m_triggeredUpdateTimer;               // MS2 related: short hold-down to merge rapid changes into one update
+  Time  m_periodicInterval { Seconds(2.0) };  // MS2 related: default periodic interval for advertisements
+  Time  m_triggerHold      { MilliSeconds(300) }; // MS2 related: throttle window for triggered updates
+
+  // ---------------- MS2 Routing Table (Part 2) ----------------
+  std::map<Ipv4Address, RoutingTableEntry> m_routingTable;
 };
 
 #endif
