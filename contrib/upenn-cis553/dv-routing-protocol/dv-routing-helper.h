@@ -31,6 +31,8 @@ using namespace ns3;
 class DVRoutingHelper : public Ipv4RoutingHelper
 {
   public:
+  DVRoutingHelper& WithLsLikeIntervals(Time advert, Time hold, Time maintenance);
+  DVRoutingHelper& WithPingTimeout(Time t);
     DVRoutingHelper ();
 
     DVRoutingHelper (const DVRoutingHelper &);
