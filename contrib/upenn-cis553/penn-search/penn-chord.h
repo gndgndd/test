@@ -22,18 +22,19 @@
 #include "ns3/penn-application.h"
 #include "ns3/penn-chord-message.h"
 #include "ns3/ping-request.h"
-#include <openssl/sha.h>
-
 #include "ns3/ipv4-address.h"
-#include <map>
-#include <set>
-#include <vector>
-#include <string>
 #include "ns3/socket.h"
 #include "ns3/nstime.h"
 #include "ns3/timer.h"
 #include "ns3/uinteger.h"
 #include "ns3/boolean.h"
+#include "ns3/grader-logs.h"
+#include "ns3/penn-key-helper.h"
+
+#include <map>
+#include <set>
+#include <vector>
+#include <string>
 
 using namespace ns3;
 
@@ -44,6 +45,7 @@ class PennChord : public PennApplication
     PennChord ();
     virtual ~PennChord ();
 
+    /* Provided ping API */
     void SendPing (Ipv4Address destAddress, std::string pingMessage);
     void RecvMessage (Ptr<Socket> socket);
     void ProcessPingReq (PennChordMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
@@ -52,40 +54,58 @@ class PennChord : public PennApplication
     uint32_t GetNextTransactionId ();
     void StopChord ();
 
-    // Callback with Application Layer (add more when required)
     void SetPingSuccessCallback (Callback <void, Ipv4Address, std::string> pingSuccessFn);
     void SetPingFailureCallback (Callback <void, Ipv4Address, std::string> pingFailureFn);
-    void SetPingRecvCallback (Callback <void, Ipv4Address, std::string> pingRecvFn);
+    void SetPingRecvCallback    (Callback <void, Ipv4Address, std::string> pingRecvFn);
 
-    // From PennApplication
+    /* From PennApplication */
     virtual void ProcessCommand (std::vector<std::string> tokens);
-    
-    
-    // ---------------------------------------
-
 
   protected:
     virtual void DoDispose ();
-    
+
   private:
     virtual void StartApplication (void);
     virtual void StopApplication (void);
 
+    /* ---- MS1: Chord State ---- */
+    Ipv4Address m_self;
+    Ipv4Address m_pred;   // Ipv4Address::GetAny() if none
+    Ipv4Address m_succ;   // self if alone
 
+    /* ---- Timers ---- */
+    Timer m_auditPingsTimer;
+    Timer m_stabilizeTimer;
+
+    /* ---- Config ---- */
+    Time m_pingTimeout;
+    Time m_stabilizeInterval;
+    uint16_t m_appPort;
+
+    /* ---- Sockets, trackers, callbacks ---- */
     uint32_t m_currentTransactionId;
     Ptr<Socket> m_socket;
-    Time m_pingTimeout;
-    uint16_t m_appPort;
-    // Timers
-    Timer m_auditPingsTimer;
-    // Ping tracker
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
-    // Callbacks
     Callback <void, Ipv4Address, std::string> m_pingSuccessFn;
     Callback <void, Ipv4Address, std::string> m_pingFailureFn;
     Callback <void, Ipv4Address, std::string> m_pingRecvFn;
+
+    /* ---- Helpers ---- */
+    void ScheduleStabilize ();
+    void DoStabilize (); // send STAB_REQ to successor
+    void SendTo (Ipv4Address dst, const PennChordMessage &msg);
+
+    /* Join helpers */
+    void DoCreateRing ();
+    void DoJoin (Ipv4Address knownNode);
+    bool InIntervalOpenClosed (uint32_t key, uint32_t a, uint32_t b) const; // (a, b]
+    bool InIntervalWrapAware  (uint32_t key, uint32_t a, uint32_t b) const; // (a, b] mod 2^m
+    uint32_t Hash32 (Ipv4Address ip) const;
+    uint32_t NodeIdFromIp (Ipv4Address ip) const;
+
+    /* RINGSTATE helpers */
+    void LogRingStateOnce ();
+    void StartRingState ();
 };
 
 #endif
-
-
