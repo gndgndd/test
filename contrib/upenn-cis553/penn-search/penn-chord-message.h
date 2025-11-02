@@ -34,14 +34,14 @@ class PennChordMessage : public Header
 
     enum MessageType
     {
-      PING_REQ      = 1,
-      PING_RSP      = 2,
-      JOIN_FIND     = 3,   // find successor for a joining node (greedy forwarding)
-      JOIN_REPLY    = 4,   // reply with successor
-      STAB_REQ      = 5,   // stabilize request (ask successor for its predecessor)
-      STAB_RSP      = 6,   // stabilize response (predecessor of successor)
-      NOTIFY        = 7,   // notify(candidate) per Chord
-      RINGSTATE     = 8    // ringstate traversal (carries origin)
+      PING_REQ   = 1,
+      PING_RSP   = 2,
+      JOIN_FIND  = 3,  // ask the ring to find successor for 'joiner'
+      JOIN_REPLY = 4,  // reply with successor
+      STAB_REQ   = 5,  // stabilize request
+      STAB_RSP   = 6,  // stabilize response with predecessor
+      NOTIFY     = 7,  // notify(candidate)
+      RINGSTATE  = 8   // ringstate traversal (carries origin)
     };
 
     PennChordMessage (PennChordMessage::MessageType messageType, uint32_t transactionId);
@@ -53,8 +53,8 @@ class PennChordMessage : public Header
     uint32_t GetTransactionId () const;
 
   private:
-    MessageType m_messageType;
-    uint32_t m_transactionId;
+    MessageType m_messageType = (MessageType)0;
+    uint32_t m_transactionId = 0;
 
   public:
     static TypeId GetTypeId (void);
@@ -64,7 +64,7 @@ class PennChordMessage : public Header
     void Serialize (Buffer::Iterator start) const;
     uint32_t Deserialize (Buffer::Iterator start);
 
-    /* ----------- Existing PING payloads ----------- */
+    /* -------- PING payloads (given) -------- */
     struct PingReq
     {
       void Print (std::ostream &os) const;
@@ -83,13 +83,12 @@ class PennChordMessage : public Header
       std::string pingMessage;
     };
 
-    /* ----------- New MS1 payloads ----------- */
+    /* -------- MS1 payloads -------- */
     struct JoinFind
     {
-      // find successor for "joiner"
-      Ipv4Address joiner;
-      uint32_t joinerHash;    // 32-bit hash for ordering
-      Ipv4Address origin;     // for tracing (first hop), not strictly required
+      Ipv4Address joiner;     // the node that wants to join
+      uint32_t    joinerHash; // 32-bit hash of joiner (CreateShaKey)
+      Ipv4Address origin;     // first hop (optional; useful for trace)
 
       void Print (std::ostream &os) const;
       uint32_t GetSerializedSize (void) const;
@@ -99,7 +98,7 @@ class PennChordMessage : public Header
 
     struct JoinReply
     {
-      Ipv4Address successor;  // successor of the joiner (where it should attach)
+      Ipv4Address successor;  // successor of joiner
       void Print (std::ostream &os) const;
       uint32_t GetSerializedSize (void) const;
       void Serialize (Buffer::Iterator &start) const;
@@ -116,7 +115,7 @@ class PennChordMessage : public Header
 
     struct StabilizeRsp
     {
-      Ipv4Address predecessor; // predecessor of the node who replied
+      Ipv4Address predecessor; // predecessor of the responder
       void Print (std::ostream &os) const;
       uint32_t GetSerializedSize (void) const;
       void Serialize (Buffer::Iterator &start) const;
@@ -134,7 +133,7 @@ class PennChordMessage : public Header
 
     struct RingStateMsg
     {
-      Ipv4Address origin;     // the node that initiated traversal
+      Ipv4Address origin;     // ringstate initiator
       void Print (std::ostream &os) const;
       uint32_t GetSerializedSize (void) const;
       void Serialize (Buffer::Iterator &start) const;
@@ -155,14 +154,14 @@ class PennChordMessage : public Header
     } m_message;
 
   public:
-    /* Accessors/Mutators for existing PING types */
+    /* PING accessors */
     PingReq GetPingReq ();
     void SetPingReq (std::string message);
 
     PingRsp GetPingRsp ();
     void SetPingRsp (std::string message);
 
-    /* Accessors/Mutators for new types */
+    /* MS1 accessors */
     JoinFind GetJoinFind ();
     void SetJoinFind (Ipv4Address joiner, uint32_t joinerHash, Ipv4Address origin);
 
@@ -180,7 +179,6 @@ class PennChordMessage : public Header
 
     RingStateMsg GetRingState ();
     void SetRingState (Ipv4Address origin);
-
 }; // class PennChordMessage
 
 static inline std::ostream& operator<< (std::ostream& os, const PennChordMessage& message)
