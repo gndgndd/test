@@ -32,8 +32,6 @@
 #include "ns3/penn-key-helper.h"
 
 #include <map>
-#include <set>
-#include <vector>
 #include <string>
 
 using namespace ns3;
@@ -68,9 +66,9 @@ class PennChord : public PennApplication
     virtual void StartApplication (void);
     virtual void StopApplication (void);
 
-    /* ---- MS1: Chord State ---- */
+    /* ---- Chord State ---- */
     Ipv4Address m_self;
-    Ipv4Address m_pred;   // Ipv4Address::GetAny() if none
+    Ipv4Address m_pred;   // GetAny() if none
     Ipv4Address m_succ;   // self if alone
 
     /* ---- Timers ---- */
@@ -91,19 +89,19 @@ class PennChord : public PennApplication
     Callback <void, Ipv4Address, std::string> m_pingRecvFn;
 
     /* ---- Helpers ---- */
-    void ScheduleStabilize ();
-    void DoStabilize (); // send STAB_REQ to successor
     void SendTo (Ipv4Address dst, const PennChordMessage &msg);
 
-    /* Join helpers */
     void DoCreateRing ();
     void DoJoin (Ipv4Address knownNode);
+    void ScheduleStabilize ();
+    void DoStabilize ();
+
     bool InIntervalOpenClosed (uint32_t key, uint32_t a, uint32_t b) const; // (a, b]
-    bool InIntervalWrapAware  (uint32_t key, uint32_t a, uint32_t b) const; // (a, b] mod 2^m
+    bool InIntervalWrapAware  (uint32_t key, uint32_t a, uint32_t b) const; // wrap aware
     uint32_t Hash32 (Ipv4Address ip) const;
     uint32_t NodeIdFromIp (Ipv4Address ip) const;
 
-    /* RINGSTATE helpers */
+    /* RingState helpers */
     void LogRingStateOnce ();
     void StartRingState ();
 };
