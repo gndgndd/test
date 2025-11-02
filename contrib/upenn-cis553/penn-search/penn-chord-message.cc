@@ -47,10 +47,10 @@ PennChordMessage::GetInstanceTypeId (void) const
   return GetTypeId ();
 }
 
+/* --- helpers for IPv4 (network byte order) --- */
 static inline void WriteIpv4 (Buffer::Iterator &i, Ipv4Address a)
 {
-  uint32_t raw = a.Get ();
-  i.WriteHtonU32 (raw);
+  i.WriteHtonU32 (a.Get ());
 }
 static inline Ipv4Address ReadIpv4 (Buffer::Iterator &i)
 {
@@ -95,7 +95,7 @@ PennChordMessage::Print (std::ostream &os) const
       case STAB_RSP:   m_message.stabRsp.Print (os); break;
       case NOTIFY:     m_message.notify.Print (os); break;
       case RINGSTATE:  m_message.ringstate.Print (os); break;
-      default: break;
+      default: break;  
     }
   os << "\n****END OF MESSAGE****\n";
 }
@@ -117,7 +117,7 @@ PennChordMessage::Serialize (Buffer::Iterator start) const
       case STAB_RSP:   m_message.stabRsp.Serialize (i); break;
       case NOTIFY:     m_message.notify.Serialize (i); break;
       case RINGSTATE:  m_message.ringstate.Serialize (i); break;
-      default: NS_ASSERT (false);
+      default: NS_ASSERT (false);   
     }
 }
 
@@ -149,7 +149,7 @@ PennChordMessage::Deserialize (Buffer::Iterator start)
 uint32_t PennChordMessage::PingReq::GetSerializedSize () const { return sizeof(uint16_t) + pingMessage.length(); }
 void     PennChordMessage::PingReq::Print (std::ostream &os) const { os << "PingReq:: Message: " << pingMessage << "\n"; }
 void     PennChordMessage::PingReq::Serialize (Buffer::Iterator &i) const { i.WriteU16 (pingMessage.length()); i.Write ((uint8_t*)(const_cast<char*>(pingMessage.c_str())), pingMessage.length()); }
-uint32_t PennChordMessage::PingReq::Deserialize (Buffer::Iterator &i) { uint16_t l=i.ReadU16(); char* s=(char*)malloc(l); i.Read((uint8_t*)s,l); pingMessage=std::string(s,l); free(s); return GetSerializedSize(); }
+uint32_t PennChordMessage::PingReq::Deserialize (Buffer::Iterator &i) { uint16_t l=i.ReadU16(); char* s=(char*) malloc(l); i.Read((uint8_t*)s,l); pingMessage=std::string(s,l); free(s); return GetSerializedSize(); }
 void     PennChordMessage::SetPingReq (std::string m) { if (m_messageType==0) m_messageType=PING_REQ; else NS_ASSERT (m_messageType==PING_REQ); m_message.pingReq.pingMessage=m; }
 PennChordMessage::PingReq PennChordMessage::GetPingReq () { return m_message.pingReq; }
 
@@ -157,8 +157,8 @@ PennChordMessage::PingReq PennChordMessage::GetPingReq () { return m_message.pin
 uint32_t PennChordMessage::PingRsp::GetSerializedSize () const { return sizeof(uint16_t) + pingMessage.length(); }
 void     PennChordMessage::PingRsp::Print (std::ostream &os) const { os << "PingReq:: Message: " << pingMessage << "\n"; }
 void     PennChordMessage::PingRsp::Serialize (Buffer::Iterator &i) const { i.WriteU16 (pingMessage.length()); i.Write ((uint8_t*)(const_cast<char*>(pingMessage.c_str())), pingMessage.length()); }
-uint32_t PennChordMessage::PingRsp::Deserialize (Buffer::Iterator &i) { uint16_t l=i.ReadU16(); char* s=(char*)malloc(l); i.Read((uint8_t*)s,l); pingMessage=std::string(s,l); free(s); return GetSerializedSize(); }
-void     PennChordMessage::SetPingRsp (std::string m) { if (m_messageType==0) m_messageType=PING_RSP; else NS_ASSERT (m_messageType==PING_RSP); m_message.pingRsp.pingMessage=m; }
+uint32_t PennChordMessage::PingRsp::Deserialize (Buffer::Iterator &i) { uint16_t l=i.ReadU16(); char* s=(char*) malloc(l); i.Read((uint8_t*)s,l); pingMessage=std::string(s,l); free(s); return GetSerializedSize(); }
+void     PennChordMessage::SetPingRsp (std::string m) { if (m_messageType==0) m_messageType=PING_RSP; else NS_ASSERT(m_messageType==PING_RSP); m_message.pingRsp.pingMessage=m; }
 PennChordMessage::PingRsp PennChordMessage::GetPingRsp () { return m_message.pingRsp; }
 
 /* ===== JOIN_FIND ===== */
@@ -209,7 +209,7 @@ uint32_t PennChordMessage::RingStateMsg::Deserialize (Buffer::Iterator &i) { ori
 void     PennChordMessage::SetRingState (Ipv4Address origin) { if (m_messageType==0) m_messageType=RINGSTATE; else NS_ASSERT(m_messageType==RINGSTATE); m_message.ringstate.origin=origin; }
 PennChordMessage::RingStateMsg PennChordMessage::GetRingState () { return m_message.ringstate; }
 
-/* ===== Core setters ===== */
+/* ===== Core setters/gets ===== */
 void PennChordMessage::SetMessageType (MessageType t) { m_messageType = t; }
 PennChordMessage::MessageType PennChordMessage::GetMessageType () const { return m_messageType; }
 void PennChordMessage::SetTransactionId (uint32_t id) { m_transactionId = id; }
