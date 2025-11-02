@@ -34,44 +34,28 @@ class PennChordMessage : public Header
 
     enum MessageType
     {
-      PING_REQ = 1,
-      PING_RSP = 2,
-      // Define extra message types when needed
+      PING_REQ      = 1,
+      PING_RSP      = 2,
+      JOIN_FIND     = 3,   // find successor for a joining node (greedy forwarding)
+      JOIN_REPLY    = 4,   // reply with successor
+      STAB_REQ      = 5,   // stabilize request (ask successor for its predecessor)
+      STAB_RSP      = 6,   // stabilize response (predecessor of successor)
+      NOTIFY        = 7,   // notify(candidate) per Chord
+      RINGSTATE     = 8    // ringstate traversal (carries origin)
     };
 
     PennChordMessage (PennChordMessage::MessageType messageType, uint32_t transactionId);
 
-    /**
-    *  \brief Sets message type
-    *  \param messageType message type
-    */
     void SetMessageType (MessageType messageType);
-
-    /**
-     *  \returns message type
-     */
     MessageType GetMessageType () const;
 
-    /**
-     *  \brief Sets Transaction Id
-     *  \param transactionId Transaction Id of the request
-     */
     void SetTransactionId (uint32_t transactionId);
-
-    /**
-     *  \returns Transaction Id
-     */
     uint32_t GetTransactionId () const;
 
   private:
-    /**
-     *  \cond
-     */
     MessageType m_messageType;
     uint32_t m_transactionId;
-    /**
-     *  \endcond
-     */
+
   public:
     static TypeId GetTypeId (void);
     virtual TypeId GetInstanceTypeId (void) const;
@@ -80,56 +64,122 @@ class PennChordMessage : public Header
     void Serialize (Buffer::Iterator start) const;
     uint32_t Deserialize (Buffer::Iterator start);
 
-    
+    /* ----------- Existing PING payloads ----------- */
     struct PingReq
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // Payload
-        std::string pingMessage;
-      };
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+      std::string pingMessage;
+    };
 
     struct PingRsp
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // Payload
-        std::string pingMessage;
-      };
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+      std::string pingMessage;
+    };
+
+    /* ----------- New MS1 payloads ----------- */
+    struct JoinFind
+    {
+      // find successor for "joiner"
+      Ipv4Address joiner;
+      uint32_t joinerHash;    // 32-bit hash for ordering
+      Ipv4Address origin;     // for tracing (first hop), not strictly required
+
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+    };
+
+    struct JoinReply
+    {
+      Ipv4Address successor;  // successor of the joiner (where it should attach)
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+    };
+
+    struct StabilizeReq
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+    };
+
+    struct StabilizeRsp
+    {
+      Ipv4Address predecessor; // predecessor of the node who replied
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+    };
+
+    struct NotifyMsg
+    {
+      Ipv4Address candidate;  // candidate predecessor (sender)
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+    };
+
+    struct RingStateMsg
+    {
+      Ipv4Address origin;     // the node that initiated traversal
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+    };
 
   private:
     struct
-      {
-        PingReq pingReq;
-        PingRsp pingRsp;
-      } m_message;
-    
+    {
+      PingReq      pingReq;
+      PingRsp      pingRsp;
+      JoinFind     joinFind;
+      JoinReply    joinReply;
+      StabilizeReq stabReq;
+      StabilizeRsp stabRsp;
+      NotifyMsg    notify;
+      RingStateMsg ringstate;
+    } m_message;
+
   public:
-    /**
-     *  \returns PingReq Struct
-     */
+    /* Accessors/Mutators for existing PING types */
     PingReq GetPingReq ();
-
-    /**
-     *  \brief Sets PingReq message params
-     *  \param message Payload String
-     */
-
     void SetPingReq (std::string message);
 
-    /**
-     * \returns PingRsp Struct
-     */
     PingRsp GetPingRsp ();
-    /**
-     *  \brief Sets PingRsp message params
-     *  \param message Payload String
-     */
     void SetPingRsp (std::string message);
+
+    /* Accessors/Mutators for new types */
+    JoinFind GetJoinFind ();
+    void SetJoinFind (Ipv4Address joiner, uint32_t joinerHash, Ipv4Address origin);
+
+    JoinReply GetJoinReply ();
+    void SetJoinReply (Ipv4Address successor);
+
+    StabilizeReq GetStabilizeReq ();
+    void SetStabilizeReq ();
+
+    StabilizeRsp GetStabilizeRsp ();
+    void SetStabilizeRsp (Ipv4Address predecessor);
+
+    NotifyMsg GetNotify ();
+    void SetNotify (Ipv4Address candidate);
+
+    RingStateMsg GetRingState ();
+    void SetRingState (Ipv4Address origin);
 
 }; // class PennChordMessage
 
