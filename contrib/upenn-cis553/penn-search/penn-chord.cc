@@ -17,9 +17,13 @@
  */
 
 #include "penn-chord.h"
+
 #include "ns3/inet-socket-address.h"
 #include "ns3/random-variable-stream.h"
 #include "ns3/simulator.h"
+
+#include <cctype>
+#include <string>
 
 using namespace ns3;
 
@@ -78,22 +82,19 @@ PennChord::StartApplication (void)
       m_socket->SetRecvCallback (MakeCallback (&PennChord::RecvMessage, this));
     }
 
-  // derive my IP address from the provided map (simulation stack)
-  // Prefer: node id lookup (primary) then fallback to m_local if in real stack mode
+  // Resolve my simulation IP (fall back to m_local if needed)
   std::map<uint32_t, Ipv4Address>::iterator it = m_nodeAddressMap.find (GetNode()->GetId());
   if (it != m_nodeAddressMap.end())
     m_self = it->second;
   else
-    m_self = GetLocalAddress(); // in case of real stack
+    m_self = GetLocalAddress();
 
-  // Initially not in any ring
   m_pred = Ipv4Address::GetAny ();
   m_succ = Ipv4Address::GetAny ();
 
-  // Configure timers
+  // Timers
   m_auditPingsTimer.SetFunction (&PennChord::AuditPings, this);
   m_auditPingsTimer.Schedule (m_pingTimeout);
-
   m_stabilizeTimer.SetFunction (&PennChord::DoStabilize, this);
 }
 
@@ -118,8 +119,7 @@ PennChord::ProcessCommand (std::vector<std::string> tokens)
     return;
 
   std::string cmd = tokens[0];
-  // normalize to lowercase
-  for (char &c : cmd) c = std::tolower (c);
+  for (size_t i = 0; i < cmd.size(); ++i) cmd[i] = char(std::tolower((unsigned char)cmd[i]));
 
   if (cmd == "join")
     {
@@ -131,8 +131,10 @@ PennChord::ProcessCommand (std::vector<std::string> tokens)
       Ipv4Address known = ResolveNodeIpAddress (tokens[1]);
       if (known == Ipv4Address::GetAny())
         {
-          ERROR_LOG ("JOIN: could not resolve node " << tokens[1]);
-          return;
+          // If landmark is myself, create ring
+          std::string selfId = ReverseLookup (m_self);
+          if (tokens[1] == selfId) known = m_self;
+          else { ERROR_LOG ("JOIN: could not resolve node " << tokens[1]); return; }
         }
       DoJoin (known);
       ScheduleStabilize ();
@@ -141,7 +143,7 @@ PennChord::ProcessCommand (std::vector<std::string> tokens)
 
   if (cmd == "leave")
     {
-      // Minimal leave for MS1: break links (stabilization of others will heal)
+      // Minimal planned leave for MS1
       m_pred = Ipv4Address::GetAny();
       m_succ = Ipv4Address::GetAny();
       return;
@@ -216,7 +218,8 @@ PennChord::RecvMessage (Ptr<Socket> socket)
       case PennChordMessage::JOIN_FIND:
       {
         PennChordMessage::JoinFind jf = message.GetJoinFind ();
-        // If I'm not in any ring yet, make myself my successor
+
+        // If I'm not in any ring yet, consider single-node ring on demand
         if (m_succ == Ipv4Address::GetAny())
           m_succ = m_self;
 
@@ -224,7 +227,7 @@ PennChord::RecvMessage (Ptr<Socket> socket)
         uint32_t succ = Hash32 (m_succ);
         uint32_t key  = jf.joinerHash;
 
-        // single-node ring
+        // Single-node ring
         if (m_succ == m_self)
           {
             PennChordMessage reply (PennChordMessage::JOIN_REPLY, GetNextTransactionId());
@@ -239,7 +242,7 @@ PennChord::RecvMessage (Ptr<Socket> socket)
           }
         else
           {
-            // Greedy forward to successor
+            // Forward to successor
             PennChordMessage fwd (PennChordMessage::JOIN_FIND, GetNextTransactionId());
             fwd.SetJoinFind (jf.joiner, jf.joinerHash, (jf.origin == Ipv4Address::GetAny()? m_self : jf.origin));
             SendTo (m_succ, fwd);
@@ -249,17 +252,14 @@ PennChord::RecvMessage (Ptr<Socket> socket)
 
       case PennChordMessage::JOIN_REPLY:
       {
-        // This reply is addressed to the joiner (me)
         PennChordMessage::JoinReply jr = message.GetJoinReply ();
-        m_succ = jr.successor;  // set successor
-        // let stabilization/notify settle the predecessor pointers
+        m_succ = jr.successor;      // adopt successor; pred will be fixed by stabilize/notify
         ScheduleStabilize ();
         break;
       }
 
       case PennChordMessage::STAB_REQ:
       {
-        // Reply with my predecessor
         PennChordMessage rsp (PennChordMessage::STAB_RSP, GetNextTransactionId());
         rsp.SetStabilizeRsp (m_pred);
         SendTo (sourceAddress, rsp);
@@ -270,22 +270,17 @@ PennChord::RecvMessage (Ptr<Socket> socket)
       {
         PennChordMessage::StabilizeRsp sr = message.GetStabilizeRsp ();
         Ipv4Address x = sr.predecessor; // predecessor of my successor
-        if (m_succ == Ipv4Address::GetAny())
-          {
-            // nothing to do
-          }
-        else
+
+        if (m_succ != Ipv4Address::GetAny())
           {
             uint32_t selfH = Hash32 (m_self);
             uint32_t succH = Hash32 (m_succ);
             uint32_t xH    = Hash32 (x);
 
-            // If x is between me and my successor, adopt x as my successor
             if (x != Ipv4Address::GetAny() && InIntervalWrapAware (xH, selfH, succH))
               {
                 m_succ = x;
               }
-            // In any case, notify my (possibly updated) successor
             PennChordMessage ntf (PennChordMessage::NOTIFY, GetNextTransactionId());
             ntf.SetNotify (m_self);
             SendTo (m_succ, ntf);
@@ -298,6 +293,7 @@ PennChord::RecvMessage (Ptr<Socket> socket)
       {
         PennChordMessage::NotifyMsg n = message.GetNotify ();
         Ipv4Address cand = n.candidate;
+
         uint32_t selfH = Hash32 (m_self);
         uint32_t predH = Hash32 (m_pred);
         uint32_t candH = Hash32 (cand);
@@ -312,10 +308,7 @@ PennChord::RecvMessage (Ptr<Socket> socket)
       case PennChordMessage::RINGSTATE:
       {
         PennChordMessage::RingStateMsg rs = message.GetRingState ();
-        // Always log once at this node
         LogRingStateOnce ();
-
-        // If my successor is the origin, I'm the predecessor of origin -> end
         if (m_succ == rs.origin)
           {
             GraderLogs::EndOfRingState ();
@@ -407,7 +400,6 @@ PennChord::SendTo (Ipv4Address dst, const PennChordMessage &msg)
 void
 PennChord::DoCreateRing ()
 {
-  // Create a single-node ring
   m_pred = m_self;
   m_succ = m_self;
 }
@@ -420,8 +412,6 @@ PennChord::DoJoin (Ipv4Address knownNode)
       DoCreateRing ();
       return;
     }
-
-  // Ask the known node to find my successor
   uint32_t myH = Hash32 (m_self);
   PennChordMessage q (PennChordMessage::JOIN_FIND, GetNextTransactionId());
   q.SetJoinFind (m_self, myH, m_self);
@@ -440,16 +430,12 @@ PennChord::DoStabilize ()
 {
   if (m_succ == Ipv4Address::GetAny())
     {
-      // not in ring yet
       ScheduleStabilize ();
       return;
     }
-  // ask successor for its predecessor
   PennChordMessage req (PennChordMessage::STAB_REQ, GetNextTransactionId());
   req.SetStabilizeReq ();
   SendTo (m_succ, req);
-
-  // reschedule periodically
   ScheduleStabilize ();
 }
 
@@ -459,7 +445,7 @@ PennChord::InIntervalOpenClosed (uint32_t key, uint32_t a, uint32_t b) const
   // (a, b]
   if (a < b) return (key > a && key <= b);
   if (a > b) return (key > a || key <= b); // wrap-around
-  // a == b means full circle; treat as true
+  // a == b => whole ring
   return true;
 }
 
@@ -472,8 +458,7 @@ PennChord::InIntervalWrapAware (uint32_t key, uint32_t a, uint32_t b) const
 uint32_t
 PennChord::Hash32 (Ipv4Address ip) const
 {
-  // Use helper provided by the project to get a stable 32-bit hash
-  return CreateShaKey (ip);
+  return CreateShaKey (ip); // provided by PennKeyHelper (32-bit)
 }
 
 uint32_t
@@ -514,17 +499,13 @@ PennChord::StartRingState ()
       ERROR_LOG ("RINGSTATE: node " << ReverseLookup(m_self) << " not in any ring");
       return;
     }
-
-  // Print my line first
   LogRingStateOnce ();
 
   if (m_succ == m_self)
     {
-      // single-node ring: I'm predecessor of origin
       GraderLogs::EndOfRingState ();
       return;
     }
-
   PennChordMessage msg (PennChordMessage::RINGSTATE, GetNextTransactionId());
   msg.SetRingState (m_self);
   SendTo (m_succ, msg);
