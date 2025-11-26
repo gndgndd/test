@@ -52,11 +52,28 @@ class PennSearch : public PennApplication
     void AuditPings ();
     uint32_t GetNextTransactionId ();
    
-
     // Chord Callbacks
     void HandleChordPingSuccess (Ipv4Address destAddress, std::string message);
     void HandleChordPingFailure (Ipv4Address destAddress, std::string message);
     void HandleChordPingRecv (Ipv4Address destAddress, std::string message);
+
+    // Publish and Lookup Callbacks
+    void ProcessPublishReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void ProcessPublishRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void HandleChordLookupSuccess (uint32_t tid, Ipv4Address owner);
+    void HandleChordLookupFailure (uint32_t tid);
+    void PublishMetadataFile(std::string filename);
+    std::map<uint32_t, std::pair<std::string, std::vector<std::string>>> m_pendingPublishes;
+
+    // Leave Callback handling 
+    void HandleLeave(Ipv4Address successorIp);
+    void HandleRejoin(Ipv4Address successorIp);
+    void ProcessRejoin(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    std::map<uint32_t, std::pair<std::string, std::vector<std::string>>> m_pendingRejoin;
+
+    // Publish
+    void ProcessSearchReq(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void ProcessSearchRsp(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
 
     // From PennApplication
     virtual void ProcessCommand (std::vector<std::string> tokens);
@@ -67,6 +84,13 @@ class PennSearch : public PennApplication
     virtual void SetStatusVerbose (bool on);
     virtual void SetChordVerbose (bool on);
     virtual void SetSearchVerbose (bool on);
+
+    //lookup
+    void Lookup(uint32_t hashToFind);
+    void HandleLookupResult(Ipv4Address owner, uint32_t hashToFind);
+    void ProcessLookupResult(Ipv4Address owner, uint32_t hashToFind);
+    // tracker for lookups in flight
+    std::map<uint32_t, uint32_t> m_lookupTracker; //transactionId -> hashToFind
 
   protected:
     virtual void DoDispose ();
@@ -84,6 +108,17 @@ class PennSearch : public PennApplication
     Timer m_auditPingsTimer;
     // Ping tracker
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
+    // Inverted index <keyword, docIDs>
+    std::map<std::string, std::vector<std::string>> m_invertedIndex;
+
+    // search tracker: tid → (remaining keywords [to be passed on], currentDocs)
+    std::map<uint32_t, std::tuple<
+      std::vector<std::string>, // keywords
+      std::vector<std::string>, // current docs
+      Ipv4Address,              // requester
+      uint32_t                  // current keyword index
+    >> m_pendingSearches;
+
 };
 
 #endif
