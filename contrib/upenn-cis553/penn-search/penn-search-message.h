@@ -21,6 +21,7 @@
 #include "ns3/ipv4-address.h"
 #include "ns3/packet.h"
 #include "ns3/object.h"
+#include <string>
 
 using namespace ns3;
 
@@ -37,12 +38,12 @@ class PennSearchMessage : public Header
       {
         PING_REQ = 1,
         PING_RSP = 2,
-        // Define extra message types when needed 
-        PUBLISH_REQ = 3,
-        PUBLISH_RSP = 4,    
-        REJOIN_REQ = 5,
-        SEARCH_REQ = 6,
-        SEARCH_RSP = 7,
+        // Define extra message types when needed
+        // MS2 message types
+        SEARCH_REQ = 3,  // Multi keyword search
+        SEARCH_RSP = 4, // Multi keyword search
+        PUBLISH_REQ = 5,  // Inverted list publishing
+        STORE_REQ = 6     // Inverted list publishing
       };
 
     PennSearchMessage (PennSearchMessage::MessageType messageType, uint32_t transactionId);
@@ -86,7 +87,7 @@ class PennSearchMessage : public Header
     void Serialize (Buffer::Iterator start) const;
     uint32_t Deserialize (Buffer::Iterator start);
 
-    
+
     struct PingReq
       {
         void Print (std::ostream &os) const;
@@ -107,84 +108,80 @@ class PennSearchMessage : public Header
         std::string pingMessage;
       };
 
-    /**
-     * Publish request: this is the request to publish a keyword and docID
-     */
-    struct PublishReq
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // Payload
+// MS2 PAYLOAD STRUCTURES
+
+    /* SEARCH_REQ
+    * Sent hop by hop during multi keyword resolution.
+    * Each hop handles exactly ONE keyword.
+    */
+   struct SearchReq
+   {
+       std::string originIp;        // Original requester
+       std::string remainingTerms;  // Terms still not processed
+       std::string currentDocs;     // Intersection so far
+       std::string currentKeyword;  // Term being resolved at this hop
+
+       uint32_t GetSerializedSize() const;
+       void Serialize(Buffer::Iterator &start) const;
+       uint32_t Deserialize(Buffer::Iterator &start);
+       void Print(std::ostream &os) const;
+   };
+
+   /* SEARCH_RSP
+    * FINAL SEARCH RESPONSE
+    * Contains the final result only.
+    */
+   struct SearchRsp
+   {
+       std::string originIp;   // Final destination
+       std::string finalDocs;  // Completed doc list
+
+       uint32_t GetSerializedSize() const;
+       void Serialize(Buffer::Iterator &start) const;
+       uint32_t Deserialize(Buffer::Iterator &start);
+       void Print(std::ostream &os) const;
+   };
+
+      /**
+      * PUBLISH_REQ payload
+      */
+      struct PublishReq
+    {
+        std::string keyword;     // Keyword being published
+        std::string docId;       // Document ID mapped to this keyword
+
+        uint32_t GetSerializedSize() const;
+        void Serialize(Buffer::Iterator &start) const;
+        uint32_t Deserialize(Buffer::Iterator &start);
+        void Print(std::ostream &os) const;
+    };
+
+      /**
+      * STORE_REQ payload
+      */
+      struct StoreReq
+    {
         std::string keyword;
-        std::vector<std::string> docID;
-      };
+        std::string docId;
 
-    /**
-     * Publish response: this is the response to a publish request
-     */
-    struct PublishRsp
-      {
-        void Print (std::ostream &os) const;
-        uint32_t GetSerializedSize (void) const;
-        void Serialize (Buffer::Iterator &start) const;
-        uint32_t Deserialize (Buffer::Iterator &start);
-        // no payload
-      };
-
-    /**
-     * Rejoin Req: this is what a search node sends to a successor when it rejoins to get back it's documents
-     */
-    struct RejoinReq
-    {
-      void Print (std::ostream &os) const;
-      uint32_t GetSerializedSize (void) const;
-      void Serialize (Buffer::Iterator &start) const;
-      uint32_t Deserialize (Buffer::Iterator &start);
-
-      Ipv4Address requester;
+        uint32_t GetSerializedSize() const;
+        void Serialize(Buffer::Iterator &start) const;
+        uint32_t Deserialize(Buffer::Iterator &start);
+        void Print(std::ostream &os) const;
     };
-
-    struct SearchReq
-    {
-      void Print (std::ostream &os) const;
-      uint32_t GetSerializedSize (void) const;
-      void Serialize (Buffer::Iterator &start) const;
-      uint32_t Deserialize (Buffer::Iterator &start);
-
-      Ipv4Address requester;
-      std::vector<std::string> keywords;
-      std::vector<std::string> returnDocs;
-      uint32_t keywordIndex = 0;
-    };
-
-    struct SearchRsp
-    {
-      void Print (std::ostream &os) const;
-      uint32_t GetSerializedSize (void) const;
-      void Serialize (Buffer::Iterator &start) const;
-      uint32_t Deserialize (Buffer::Iterator &start);
-
-      Ipv4Address requester;
-      std::vector<std::string> results;
-    };
-    
-    
-    
 
   private:
     struct
       {
         PingReq pingReq;
         PingRsp pingRsp;
-        PublishReq publishReq;
-        PublishRsp publishRsp;
-        RejoinReq rejoinReq;
-        SearchReq searchReq;
-        SearchRsp searchRsp;
+        // MS2 message payloads
+       SearchReq searchReq;
+       SearchRsp searchRsp;
+       PublishReq publishReq;
+       StoreReq storeReq;
       } m_message;
-    
+
   public:
     /**
      *  \returns PingReq Struct
@@ -208,36 +205,26 @@ class PennSearchMessage : public Header
      */
     void SetPingRsp (std::string message);
 
-    /**
-     *  \returns PublishReq Struct
-     */
-    PublishReq GetPublishReq ();
+//MS2 GETTERS AND SETTERS
 
-    /**
-     *  \brief Sets PublishReq message params
-     *  \param message Payload String
-     */
-    void SetPublishReq (std::string keyword, const std::vector<std::string>& docID);
-
-    /**
-     *  \returns PublishRsp Struct
-     */
-    PublishRsp GetPublishRsp ();
-
-    /**
-     *  \brief Sets PublishRsp message params
-     *  \param message Payload String
-     */
-    void SetPublishRsp ();
-
-    void SetRejoinReq (Ipv4Address requesterIp);
-    RejoinReq GetRejoinReq ();
-
-    void SetSearchReq(Ipv4Address requester, std::vector<std::string>& keywords, std::vector<std::string>& returnDocs, uint32_t keywordIndex);
     SearchReq GetSearchReq();
+    void SetSearchReq(const std::string &originIp,
+                      const std::string &remainingTerms,
+                      const std::string &currentDocs,
+                      const std::string &currentKeyword);
 
-    void SetSearchRsp(Ipv4Address requester, std::vector<std::string>& returnDocs);
     SearchRsp GetSearchRsp();
+    void SetSearchRsp(const std::string &originIp,
+                      const std::string &finalDocs);
+
+    PublishReq GetPublishReq();
+    void SetPublishReq(const std::string &keyword,
+                      const std::string &docId);
+
+    StoreReq GetStoreReq();
+    void SetStoreReq(const std::string &keyword,
+                    const std::string &docId);
+
 }; // class PennSearchMessage
 
 static inline std::ostream& operator<< (std::ostream& os, const PennSearchMessage& message)
@@ -247,3 +234,4 @@ static inline std::ostream& operator<< (std::ostream& os, const PennSearchMessag
 }
 
 #endif
+
