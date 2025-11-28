@@ -59,9 +59,6 @@ class PennChord : public PennApplication
 
     // ==============================================================
     // Milestone 2A – Lookup callbacks and drivers
-    // --------------------------------------------------------------
-    // The Chord layer exposes a generic "lookup result" callback
-    // and more specialized publish/search callbacks for PennSearch.
     // ==============================================================
 
     // Generic callback: key hash -> owner node
@@ -99,11 +96,12 @@ class PennChord : public PennApplication
     Ptr<Socket> m_socket;
     Time m_pingTimeout;
     uint16_t m_appPort;
-    // Timers
+
+    // ==============================================================
+    // PING/AUDIT MEMBERS (Restored)
+    // ==============================================================
     Timer m_auditPingsTimer;
-    // Ping tracker
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
-    // Callbacks
     Callback <void, Ipv4Address, std::string> m_pingSuccessFn;
     Callback <void, Ipv4Address, std::string> m_pingFailureFn;
     Callback <void, Ipv4Address, std::string> m_pingRecvFn;
@@ -127,12 +125,7 @@ class PennChord : public PennApplication
     Callback<void, std::string, std::string, Ipv4Address> m_publishLookupFn;
 
     // ==============================================================
-    // Milestone 1 – Chord ring management (simulated / logical ring)
-    // --------------------------------------------------------------
-    // These methods and fields implement the basic Chord ring:
-    //   - JOIN / LEAVE
-    //   - successor / predecessor bookkeeping
-    //   - basic stabilization logic (but no finger tables yet)
+    // Milestone 1 – Chord ring management
     // ==============================================================
 
     void CreateChord();
@@ -141,25 +134,48 @@ class PennChord : public PennApplication
     void Ringstate();
 
     // ==============================================================
-    // Milestone 1 – Part 2: Stabilization + Notify
-    // --------------------------------------------------------------
-    // Added fields and helper functions to maintain the Chord ring:
-    // successor, predecessor, and consistency logic (no finger tables yet).
+    // Milestone 1/2 – Stabilization + Notify
     // ==============================================================
 
     void Stabilize ();                 // runs ring stabilization logic
     void Notify (Ipv4Address node);    // updates predecessor if needed
-    bool IsBetween (Ipv4Address target, Ipv4Address start, Ipv4Address end); // helper for hash-space checks
+    // Helper for hash-space checks (target in (start, end))
+    bool IsBetween (Ipv4Address target, Ipv4Address start, Ipv4Address end); 
+
+    // ==============================================================
+    // Milestone 2A – Finger Table (for O(log N) routing)
+    // ==============================================================
+
+    struct FingerEntry
+    {
+      uint32_t start;       // The ID this finger is responsible for: (n + 2^(i-1)) mod 2^m
+      Ipv4Address successor; // The IP address of the successor
+    };
+
+    std::vector<FingerEntry> m_fingerTable; // Finger table (size m=32 for 32-bit hash)
+    uint32_t m_fingerIndex;                 // Index used by FixFingers
+
+    void InitFingerTable();
+    void FixFingers();
+    Ipv4Address FindSuccessor(uint32_t id); // Main lookup function
+    Ipv4Address ClosestPrecedingFinger(uint32_t id); // Helper for FindSuccessor
+
+    // ==============================================================
+    // Milestone 2A – Stabilization Timers (Declared after m_fingerIndex)
+    // ==============================================================
+    Timer m_stabilizeTimer;
+    Timer m_fixFingersTimer;
+    void StartPeriodicStabilization();
+
 
     // Helpers
     static std::string ToHexKey (uint32_t value);
-    Ipv4Address FindSuccessor (uint32_t id);
     void SendRingstate (Ipv4Address target);
 
     Ipv4Address m_successor;           // node's immediate successor
     Ipv4Address m_predecessor;         // node's immediate predecessor
 
-    // Global ring tracking (simulated for M1)
+    // Global ring tracking (simulated for M1/M2)
     static std::set<Ipv4Address> s_joined;
     static std::map<Ipv4Address, Ipv4Address> m_successorPredecessor;
 };
