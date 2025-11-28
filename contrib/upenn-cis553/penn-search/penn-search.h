@@ -1,4 +1,4 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
+﻿/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 University of Pennsylvania
  *
@@ -29,12 +29,12 @@
 #include <set>
 #include <vector>
 #include <string>
+#include <tuple> // Added for std::tuple usage
 #include "ns3/socket.h"
 #include "ns3/nstime.h"
 #include "ns3/timer.h"
 #include "ns3/uinteger.h"
 #include "ns3/boolean.h"
-#include <sstream>
 
 using namespace ns3;
 
@@ -52,23 +52,37 @@ class PennSearch : public PennApplication
     void ProcessPingRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
     void AuditPings ();
     uint32_t GetNextTransactionId ();
-
+   
     // Chord Callbacks
     void HandleChordPingSuccess (Ipv4Address destAddress, std::string message);
     void HandleChordPingFailure (Ipv4Address destAddress, std::string message);
     void HandleChordPingRecv (Ipv4Address destAddress, std::string message);
 
-    /* ============================================================
-       MS2A SEARCH CHORD LOOKUP CALLBACK
-       Called by Chord once it resolves the owner of a keyword.
-       The contextKey is a concatenation of:
-         nextKeyword | currentDocs | remainingTerms | originIp
-       ============================================================ */
-    void HandleSearchChordLookup (std::string contextKey, Ipv4Address owner);
+    // Publish and Lookup Callbacks
+    void ProcessPublishReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void ProcessPublishRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    
+    // FIX: Match definitions in .cc
+    void HandleChordLookupSuccess (uint32_t tid, Ipv4Address owner); 
+    void HandleChordLookupFailure (uint32_t tid);
+    void PublishMetadataFile(std::string filepath); // FIX: Signature matches definition
+
+    std::map<uint32_t, std::pair<std::string, std::vector<std::string>>> m_pendingPublishes;
+
+    // Leave/Rejoin/Transfer
+    void HandleLeave(Ipv4Address successorIp); 
+    void HandleRejoin(Ipv4Address successorIp); 
+    void ProcessRejoin(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort); 
+    void TransferKeys(Ipv4Address newOwner, Ipv4Address oldOwner); // FIX: Added declaration
+
+    std::map<uint32_t, std::pair<std::string, std::vector<std::string>>> m_pendingRejoin;
+
+    // Search
+    void ProcessSearchReq(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void ProcessSearchRsp(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
 
     // From PennApplication
     virtual void ProcessCommand (std::vector<std::string> tokens);
-
     // From PennLog
     virtual void SetTrafficVerbose (bool on);
     virtual void SetErrorVerbose (bool on);
@@ -77,82 +91,17 @@ class PennSearch : public PennApplication
     virtual void SetChordVerbose (bool on);
     virtual void SetSearchVerbose (bool on);
 
-    /* =============================================================
-       MS2 SEARCH HANDLERS
-       Supports multi-keyword search queries.
-       ============================================================= */
-
-    // User-initiated search entry point
-    void StartSearch (const std::vector<std::string> &terms);
-
-    // Handles incoming SEARCH_REQ
-    void ProcessSearchReq (PennSearchMessage message,
-                           Ipv4Address sourceAddress,
-                           uint16_t sourcePort);
-
-    // Handles incoming SEARCH_RSP (origin node)
-    // Contains originIp + finalDocs
-    void ProcessSearchRsp (PennSearchMessage message,
-                           Ipv4Address sourceAddress,
-                           uint16_t sourcePort);
-
-    // Drives the multi-keyword workflow.
-    // When remainingTerms is empty, sends SEARCH_RSP to the origin.
-    void ContinueSearch (const std::string &currentKeyword,
-                         const std::string &currentDocs,
-                         const std::string &remainingTerms,
-                         const std::string &originIp);
-
-    /* =============================================================
-       MS2 PUBLISH AND STORE HANDLERS
-       ============================================================= */
-
-    void ProcessPublishReq (PennSearchMessage message,
-                            Ipv4Address sourceAddress,
-                            uint16_t sourcePort);
-
-    void ProcessStoreReq (PennSearchMessage message,
-                          Ipv4Address sourceAddress,
-                          uint16_t sourcePort);
-
-    void HandlePublishChordLookup (std::string keyword,
-                                   std::string docId,
-                                   Ipv4Address owner);
-
-    /* =============================================================
-       MS2 HELPERS
-       ============================================================= */
-
-    // Converts set to space-separated string
-    std::string SetToString (const std::set<std::string> &s);
-
-    // Intersect doc lists like "a b c" and "b c d" => "b c"
-    std::string IntersectDocLists (const std::string &a,
-                                   const std::string &b);
-
-    // Combines previous docs with new docs:
-    //   if existing is empty, returns newDocs
-    //   otherwise returns intersection(existing, newDocs)
-    std::string CombineSearchResults (const std::string &existingDocs,
-                                      const std::string &newDocs);
-
-    // Initialize MS2 search structures (not strictly required for core logic)
-    void InitializeSearchLayer ();
-
-    /* ============================================================
-       TEAM STUBS
-       ============================================================ */
-    void ChordLookupForwardingStub (const std::string &keyword,
-                                    const std::string &docs,
-                                    const std::string &remaining,
-                                    const std::string &originIp,
-                                    Ipv4Address nextHop);
-
-    void DistributedInvertedListMaintenanceStub ();
+    // Lookup
+    void Lookup(uint32_t hashToFind); 
+    void HandleLookupResult(Ipv4Address owner, uint32_t transactionId); 
+    void ProcessLookupResult(Ipv4Address owner, uint32_t hashToFind); 
+    
+    // tracker for lookups in flight
+    std::map<uint32_t, uint32_t> m_lookupTracker; //transactionId -> hashToFind
 
   protected:
     virtual void DoDispose ();
-
+    
   private:
     virtual void StartApplication (void);
     virtual void StopApplication (void);
@@ -162,19 +111,20 @@ class PennSearch : public PennApplication
     Ptr<Socket> m_socket;
     Time m_pingTimeout;
     uint16_t m_appPort, m_chordPort;
-
     // Timers
     Timer m_auditPingsTimer;
-
     // Ping tracker
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
+    // Inverted index <keyword, docIDs>
+    std::map<std::string, std::vector<std::string>> m_invertedIndex; 
 
-    /* =============================================================
-       MS2 INVERTED INDEX
-       Map: keyword -> set of documents
-       ============================================================= */
-
-    std::map<std::string, std::set<std::string> > m_invertedList;
+    // search tracker: tid → (keywords, currentDocs, requester, current keyword index)
+    std::map<uint32_t, std::tuple<
+      std::vector<std::string>, // keywords
+      std::vector<std::string>, // current docs
+      Ipv4Address,              // requester
+      uint32_t                  // current keyword index
+    >> m_pendingSearches;
 };
 
 #endif

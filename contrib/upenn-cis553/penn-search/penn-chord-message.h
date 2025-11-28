@@ -36,15 +36,15 @@ class PennChordMessage : public Header
     {
       PING_REQ = 1,
       PING_RSP = 2,
-      // *** MS2A LOOKUP MESSAGES ***
-      LOOKUP_REQ = 3,       // Lookup request for a key
-      LOOKUP_FORWARD = 4,   // Forwards lookup along ring (needed for autograder)
-      LOOKUP_RSP = 5,       // Lookup result returning to requester
-      // *** MS1/MS2 STABILIZATION & RINGSTATE MESSAGES ***
-      GET_PRED_REQ = 6,     // Ask successor for its predecessor
-      GET_PRED_RSP = 7,     // Return predecessor information
-      NOTIFY_REQ = 8,       // Notify a node that I should be its new predecessor
-      RINGSTATE_REQ = 9     // Initiate / forward ring state output
+      // Define extra message types when needed
+      FIND_SUCCESSOR_REQ = 3,
+      FIND_SUCCESSOR_RSP = 4,
+      STABILIZE_REQ = 5,
+      STABILIZE_RSP = 6,
+      NOTIFY_PKT = 7,
+      RINGSTATE_PKT = 8,
+      LEAVE_SUCCESSOR = 9,
+      LEAVE_PREDECESSOR = 10,
     };
 
     PennChordMessage (PennChordMessage::MessageType messageType, uint32_t transactionId);
@@ -77,6 +77,7 @@ class PennChordMessage : public Header
      */
     MessageType m_messageType;
     uint32_t m_transactionId;
+    bool m_isLookup;  // true if this is a lookup message
     /**
      * \endcond
      */
@@ -86,12 +87,12 @@ class PennChordMessage : public Header
     void Print (std::ostream &os) const;
     uint32_t GetSerializedSize (void) const;
     void Serialize (Buffer::Iterator start) const;
-    void SerializePredReq (Buffer::Iterator &start) const;
-    uint32_t DeserializePredReq (Buffer::Iterator &start);
-    void SerializePredRsp (Buffer::Iterator &start) const;
-    uint32_t DeserializePredRsp (Buffer::Iterator &start);
     uint32_t Deserialize (Buffer::Iterator start);
 
+    // isLookup getter and setter
+    void SetIsLookup (bool isLookup);
+    bool GetIsLookup () const;
+    
     struct PingReq
       {
         void Print (std::ostream &os) const;
@@ -112,89 +113,105 @@ class PennChordMessage : public Header
         std::string pingMessage;
       };
 
-      // MS2A Lookup Payload Structures
-      struct LookupReq
-        {
-          void Print (std::ostream &os) const;
-          uint32_t GetSerializedSize () const;
-          void Serialize (Buffer::Iterator &start) const;
-          uint32_t Deserialize (Buffer::Iterator &start);
+    struct FindSuccessorReq
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
 
-          uint32_t lookupKey;               // Hashed key
-          Ipv4Address originator;           // Node that initiated lookup (for result return)
-          Ipv4Address lastHop;              // Previous hop (for hop count logs)
-        };
+      uint32_t idToFind;
+      Ipv4Address requestorIp;
+    };
 
-      struct LookupForward
-        {
-          void Print (std::ostream &os) const;
-          uint32_t GetSerializedSize () const;
-          void Serialize (Buffer::Iterator &start) const;
-          uint32_t Deserialize (Buffer::Iterator &start);
+    struct FindSuccessorRsp
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
 
-          uint32_t lookupKey;
-          Ipv4Address originator;
-          Ipv4Address lastHop;
-        };
+      Ipv4Address successorIp;
+    };
 
-      struct LookupRsp
-        {
-          void Print (std::ostream &os) const;
-          uint32_t GetSerializedSize () const;
-          void Serialize (Buffer::Iterator &start) const;
-          uint32_t Deserialize (Buffer::Iterator &start);
+    struct StabilizeReq
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
 
-          uint32_t lookupKey;
-          Ipv4Address ownerNode;            // Node that owns the key
-        };
+      Ipv4Address sender;
+      Ipv4Address receiver;
+    };
 
-      // MS1/MS2 Stabilization & Ringstate Structures
+    struct StabilizeRsp
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
 
-      struct GetPredRsp
-      {
-          void Print(std::ostream &os) const;
-          uint32_t GetSerializedSize() const;
-          void Serialize(Buffer::Iterator &start) const;
-          uint32_t Deserialize(Buffer::Iterator &start);
+      Ipv4Address sender;
+    };
 
-          Ipv4Address predecessor; // The address of the queried node's predecessor
-      };
+    struct NotifyPkt
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
 
-      struct NotifyReq
-      {
-          void Print(std::ostream &os) const;
-          uint32_t GetSerializedSize() const;
-          void Serialize(Buffer::Iterator &start) const;
-          uint32_t Deserialize(Buffer::Iterator &start);
+      Ipv4Address newPredecessor;
+    };
 
-          Ipv4Address potentialPredecessor; // The node that should be the predecessor
-      };
+    struct RingstatePkt
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
 
-      struct RingstateReq
-      {
-          void Print(std::ostream &os) const;
-          uint32_t GetSerializedSize() const;
-          void Serialize(Buffer::Iterator &start) const;
-          uint32_t Deserialize(Buffer::Iterator &start);
+      Ipv4Address endRingState;
+    };
 
-          Ipv4Address originator; // The node that started the ringstate dump
-      };
+    struct LeaveSuccessor
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+
+      Ipv4Address sender; 
+      Ipv4Address newPred;
+    };
+
+    struct LeavePredecessor
+    {
+      void Print (std::ostream &os) const;
+      uint32_t GetSerializedSize (void) const;
+      void Serialize (Buffer::Iterator &start) const;
+      uint32_t Deserialize (Buffer::Iterator &start);
+
+      Ipv4Address sender; 
+      Ipv4Address newSucc;
+    };
 
   private:
     struct
       {
         PingReq pingReq;
         PingRsp pingRsp;
-        // *** MS2A structures ***
-        LookupReq lookupReq;
-        LookupForward lookupForward;
-        LookupRsp lookupRsp;
-        // *** MS1/MS2 structures ***
-        GetPredRsp getPredRsp;
-        NotifyReq notifyReq;
-        RingstateReq ringstateReq;
+        FindSuccessorReq findSuccessorReq;
+        FindSuccessorRsp findSuccessorRsp;
+        StabilizeReq stabilizeReq;
+        StabilizeRsp stabilizeRsp;
+        NotifyPkt notifyPkt;
+        RingstatePkt ringStatePkt;
+        LeaveSuccessor leaveSuccessor;
+        LeavePredecessor leavePrededecessor;
       } m_message;
-
+    
   public:
     /**
      * \returns PingReq Struct
@@ -218,23 +235,30 @@ class PennChordMessage : public Header
      */
     void SetPingRsp (std::string message);
 
-    // MS2A: Lookup Accessors
+    void SetFindSuccessorReq(uint32_t idToFind, Ipv4Address requestorIp);
+    FindSuccessorReq GetFindSuccessorReq();
 
-    LookupReq GetLookupReq ();
-    void SetLookupReq (uint32_t key, Ipv4Address origin, Ipv4Address lastHop);
-    LookupForward GetLookupForward ();
-    void SetLookupForward (uint32_t key, Ipv4Address origin, Ipv4Address lastHop);
-    LookupRsp GetLookupRsp ();
-    void SetLookupRsp (uint32_t key, Ipv4Address owner);
+    void SetFindSuccessorRsp(Ipv4Address successorIp);
+    FindSuccessorRsp GetFindSuccessorRsp();
 
-    // MS1/MS2 Stabilization Accessors
+    void SetStabilizeReq(Ipv4Address sender, Ipv4Address recieiver);
+    StabilizeReq GetStabilizeReq();
 
-    GetPredRsp GetGetPredRsp ();
-    void SetGetPredRsp (Ipv4Address pred);
-    NotifyReq GetNotifyReq ();
-    void SetNotifyReq (Ipv4Address potentialPred);
-    RingstateReq GetRingstateReq ();
-    void SetRingstateReq (Ipv4Address originator);
+    void SetStabilizeRsp(Ipv4Address sender);
+    StabilizeRsp GetStabilizeRsp();
+
+    void SetNotifyPkt(Ipv4Address newPredecessor);
+    NotifyPkt GetNotifyPkt();
+
+    void SetRingstatePkt(Ipv4Address endRingState);
+    RingstatePkt GetRingstatePkt();
+
+    void SetLeaveSuccessor(Ipv4Address sender, Ipv4Address newPred);
+    LeaveSuccessor GetLeaveSuccessor();
+    
+    void SetLeavePredecessor(Ipv4Address sender, Ipv4Address newSucc);
+    LeavePredecessor GetLeavePredecessor();
+
 
 }; // class PennChordMessage
 

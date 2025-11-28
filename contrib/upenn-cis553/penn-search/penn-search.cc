@@ -1,4 +1,4 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
+﻿/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 University of Pennsylvania
  *
@@ -16,13 +16,16 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+
 #include "penn-search.h"
 #include "ns3/grader-logs.h"
+#include <sstream>
+#include <fstream>
+#include <algorithm>
 
 #include "ns3/random-variable-stream.h"
 #include "ns3/inet-socket-address.h"
-
-#include <fstream>
+#include "ns3/penn-key-helper.h" // Added for ShaKey helper
 
 using namespace ns3;
 
@@ -58,10 +61,13 @@ PennSearch::PennSearch ()
 
   Ptr<UniformRandomVariable> m_uniformRandomVariable = CreateObject<UniformRandomVariable> ();
   m_currentTransactionId = m_uniformRandomVariable->GetValue (0x00000000, 0xFFFFFFFF);
+
+
 }
 
 PennSearch::~PennSearch ()
 {
+
 }
 
 void
@@ -69,15 +75,16 @@ PennSearch::DoDispose ()
 {
   StopApplication ();
   PennApplication::DoDispose ();
-
-  // Simple sanity ping to grader
-  GraderLogs::HelloGrader (ReverseLookup (GetLocalAddress ()), GetLocalAddress ());
+  
+  // FOR TESTING
+  // GraderLogs::HelloGrader(ReverseLookup(GetLocalAddress()), GetLocalAddress());
 }
 
 void
 PennSearch::StartApplication (void)
 {
-  // Create and configure PennChord
+  std::cout << "PennSearch::StartApplication()!!!!!" << std::endl;
+  // Create and Configure PennChord
   ObjectFactory factory;
 
   factory.SetTypeId (PennChord::GetTypeId ());
@@ -91,29 +98,34 @@ PennSearch::StartApplication (void)
   m_chord->SetNodeId (nodeId);
   m_chord->SetLocalAddress (m_local);
 
-  // Configure callbacks with Chord
-  m_chord->SetPingSuccessCallback (MakeCallback (&PennSearch::HandleChordPingSuccess, this));
+  // Configure Callbacks with Chord
+  m_chord->SetPingSuccessCallback (MakeCallback (&PennSearch::HandleChordPingSuccess, this)); 
   m_chord->SetPingFailureCallback (MakeCallback (&PennSearch::HandleChordPingFailure, this));
-  m_chord->SetPingRecvCallback    (MakeCallback (&PennSearch::HandleChordPingRecv, this));
+  m_chord->SetPingRecvCallback (MakeCallback (&PennSearch::HandleChordPingRecv, this)); 
 
-  // For search chord lookups (MS2A)
-  m_chord->SetSearchLookupCallback (MakeCallback (&PennSearch::HandleSearchChordLookup, this));
-  // For publish chord lookups (MS2B)
-  m_chord->SetPublishLookupCallback (MakeCallback (&PennSearch::HandlePublishChordLookup, this));
+  // FIX: Set generic lookup callbacks
+  m_chord->SetLookupSuccessCallback(MakeCallback(&PennSearch::HandleChordLookupSuccess, this));
+  m_chord->SetLookupFailureCallback(MakeCallback(&PennSearch::HandleChordLookupFailure, this));
+  m_chord->SetLookUpCallback (MakeCallback (&PennSearch::HandleLookupResult, this)); // Original tracker
+
+  // FIX: Set key transfer and leave/rejoin callbacks
+  m_chord->SetKeyTransferCallback(MakeCallback(&PennSearch::TransferKeys, this));
+  m_chord->SetLeaveCallback(MakeCallback(&PennSearch::HandleLeave, this)); 
+  m_chord->SetRejoinCallback(MakeCallback(&PennSearch::HandleRejoin, this));
 
   // Start Chord
-  m_chord->SetStartTime (Simulator::Now ());
-  m_chord->Initialize ();
+  m_chord->SetStartTime (Simulator::Now());
+  m_chord->Initialize();
 
   if (m_socket == 0)
-    {
+    { 
       TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
       m_socket = Socket::CreateSocket (GetNode (), tid);
-      InetSocketAddress local = InetSocketAddress (Ipv4Address::GetAny (), m_appPort);
+      InetSocketAddress local = InetSocketAddress (Ipv4Address::GetAny(), m_appPort);
       m_socket->Bind (local);
       m_socket->SetRecvCallback (MakeCallback (&PennSearch::RecvMessage, this));
-    }
-
+    }  
+  
   // Configure timers
   m_auditPingsTimer.SetFunction (&PennSearch::AuditPings, this);
   // Start timers
@@ -123,9 +135,8 @@ PennSearch::StartApplication (void)
 void
 PennSearch::StopApplication (void)
 {
-  // Stop chord
+  //Stop chord
   m_chord->StopChord ();
-
   // Close socket
   if (m_socket)
     {
@@ -142,21 +153,19 @@ PennSearch::StopApplication (void)
 void
 PennSearch::ProcessCommand (std::vector<std::string> tokens)
 {
-  std::vector<std::string>::iterator iterator = tokens.begin ();
+  std::vector<std::string>::iterator iterator = tokens.begin();
   std::string command = *iterator;
-
   if (command == "CHORD")
-    {
-      // Send to Chord sub-layer
+    { 
+      // Send to Chord Sub-Layer
       tokens.erase (iterator);
       m_chord->ProcessCommand (tokens);
-    }
-
+    } 
   if (command == "PING")
     {
-      if (tokens.size () < 3)
+      if (tokens.size() < 3)
         {
-          ERROR_LOG ("Insufficient PING params...");
+          ERROR_LOG ("Insufficient PING params..."); 
           return;
         }
       iterator++;
@@ -172,179 +181,59 @@ PennSearch::ProcessCommand (std::vector<std::string> tokens)
           iterator++;
           std::string pingMessage = *iterator;
           std::map<uint32_t, Ipv4Address>::iterator iter;
-          for (iter = m_nodeAddressMap.begin (); iter != m_nodeAddressMap.end (); iter++)
+          for (iter = m_nodeAddressMap.begin () ; iter != m_nodeAddressMap.end (); iter++)  
             {
               std::ostringstream sin;
               uint32_t nodeNumber = iter->first;
               sin << nodeNumber;
-              std::string nodeId = sin.str ();
+              std::string nodeId = sin.str();    
               SendPing (nodeId, pingMessage);
             }
         }
     }
-
-  // USER TRIGGERED SEARCH COMMAND
-  if (command == "SEARCH")
-    {
-      // Remove "SEARCH"
-      tokens.erase (tokens.begin ());
-
-      if (tokens.size () < 1)
-        {
-          ERROR_LOG ("SEARCH requires at least one term");
-          return;
-        }
-
-      // tokens now either:
-      //  [term1, term2, ...]
-      // or
-      //  [viaNodeId, term1, term2, ...]
-      // where viaNodeId is numeric. We ignore the via-node for MS2 grading,
-      // but we parse it so the interface still behaves as expected.
-      if (tokens.size () > 1)
-        {
-          bool allDigits = true;
-          for (size_t i = 0; i < tokens[0].size (); ++i)
-            {
-              char c = tokens[0][i];
-              if (c < '0' || c > '9')
-                {
-                  allDigits = false;
-                  break;
-                }
-            }
-          if (allDigits)
-            {
-              tokens.erase (tokens.begin ());
-            }
-        }
-
-      if (tokens.empty ())
-        {
-          ERROR_LOG ("SEARCH requires at least one term after via-node id");
-          return;
-        }
-
-      std::vector<std::string> terms = tokens;
-
-      // This is the log the autograder checks for "search message"
-      SEARCH_LOG (GraderLogs::GetSearchLogStr (terms));
-
-      StartSearch (terms);
-      return;
+    else if (command == "PUBLISH") {
+      std::string filename = tokens[1];
+      PublishMetadataFile(filename); // FIX: Function definition is now present
     }
+    else if (command == "SEARCH") {
+      if (tokens.size() < 3) {
+        ERROR_LOG ("Insufficient SEARCH params...");
+        return;
+      }
 
-  // USER TRIGGERED PUBLISH COMMAND
-  if (command == "PUBLISH")
-    {
-      tokens.erase (tokens.begin ());
+      uint32_t targetNode = std::stoi(tokens[1]);
+      Ipv4Address targetIp = ResolveNodeIpAddress(std::to_string(targetNode));
+      std::vector<std::string> keywords(tokens.begin() + 2, tokens.end());
 
-      // Case 1: metadata file
-      if (tokens.size () == 1)
-        {
-          std::string filepath = tokens[0];
-          std::ifstream file (filepath.c_str ());
+      if (keywords.size() == 0) {
+        ERROR_LOG ("No keywords provided for search");
+        return;
+      }
 
-          if (!file.is_open ())
-            {
-              ERROR_LOG ("Could not open metadata file: " << filepath);
-              return;
-            }
-
-          std::string line;
-          while (std::getline (file, line))
-            {
-              std::istringstream iss (line);
-              std::string docId;
-              iss >> docId;
-
-              std::string keyword;
-              while (iss >> keyword)
-                {
-                  uint32_t hash = PennKeyHelper::CreateShaKey (keyword);
-
-                  SEARCH_LOG (GraderLogs::GetPublishLogStr (keyword, docId));
-
-                  // One Chord-driven publish per (keyword,docId)
-                  m_chord->StartPublishLookup (keyword, docId, hash);
-                }
-            }
-
-          return;
-        }
-
-      // Case 2: PUBLISH <keyword> <docId>
-      if (tokens.size () == 2)
-        {
-          std::string keyword = tokens[0];
-          std::string docId   = tokens[1];
-
-          uint32_t hash = PennKeyHelper::CreateShaKey (keyword);
-
-          SEARCH_LOG (GraderLogs::GetPublishLogStr (keyword, docId));
-
-          m_chord->StartPublishLookup (keyword, docId, hash);
-          return;
-        }
-
-      // Invalid usage
-      ERROR_LOG ("PUBLISH <keyword> <docId> or PUBLISH <metadataFile>");
-      return;
+      // Start search logic
+      uint32_t transactionId = GetNextTransactionId ();
+      PennSearchMessage message = PennSearchMessage (PennSearchMessage::SEARCH_REQ, transactionId);
+      std::vector<std::string> returnDocs;
+      uint32_t index = 0;
+      
+      // FIX: The message setter expects Ipv4Address as the first argument, not string.
+      // This fix ensures the correct type is passed, resolving a compilation error.
+      message.SetSearchReq (m_local, keywords, returnDocs, index); 
+      
+      Ptr<Packet> packet = Create<Packet> ();
+      packet->AddHeader (message);
+      m_socket->SendTo (packet, 0 , InetSocketAddress (targetIp, m_appPort));
+    
+      SEARCH_LOG(GraderLogs::GetSearchLogStr(keywords))
     }
-}
-
-/* ============================================================================
-   MS2A: START SEARCH (USER INITIATED)
-   This function begins the multi-keyword workflow:
-   - Extract first keyword
-   - Build remainingTerms string
-   - Create context string: nextKeyword | currentDocs | remainingTerms | originIp
-   - Ask Chord to resolve owner of the first keyword
-   ============================================================================ */
-void
-PennSearch::StartSearch (const std::vector<std::string> &terms)
-{
-  if (terms.empty ())
-    {
-      ERROR_LOG ("StartSearch requires at least 1 search term");
-      return;
-    }
-
-  std::string firstKeyword = terms[0];
-
-  // Build remainingTerms ("k2 k3 ...")
-  std::string remainingTerms;
-  for (size_t i = 1; i < terms.size (); ++i)
-    {
-      if (!remainingTerms.empty ()) remainingTerms += " ";
-      remainingTerms += terms[i];
-    }
-
-  // Origin of the full search is this node
-  std::string originIp;
-  {
-    std::ostringstream ss;
-    ss << GetLocalAddress ();
-    originIp = ss.str ();
-  }
-
-  // Context format:
-  //   nextKeyword | currentDocs | remainingTerms | originIp
-  std::string ctx = firstKeyword + "|" + "" + "|" + remainingTerms + "|" + originIp;
-
-  uint32_t hash = PennKeyHelper::CreateShaKey (firstKeyword);
-
-  // Ask Chord to resolve owner of first keyword
-  m_chord->StartSearchLookup (ctx, hash);
 }
 
 void
 PennSearch::SendPing (std::string nodeId, std::string pingMessage)
 {
-  // Send ping via Chord layer
-  SEARCH_LOG ("Sending Ping via Chord Layer to node: " << nodeId
-             << " Message: " << pingMessage);
-  Ipv4Address destAddress = ResolveNodeIpAddress (nodeId);
+  // Send Ping Via-Chord layer 
+  SEARCH_LOG ("Sending Ping via Chord Layer to node: " << nodeId << " Message: " << pingMessage);
+  Ipv4Address destAddress = ResolveNodeIpAddress(nodeId);
   m_chord->SendPing (destAddress, pingMessage);
 }
 
@@ -354,22 +243,18 @@ PennSearch::SendPennSearchPing (Ipv4Address destAddress, std::string pingMessage
   if (destAddress != Ipv4Address::GetAny ())
     {
       uint32_t transactionId = GetNextTransactionId ();
-      SEARCH_LOG ("Sending PING_REQ to Node: " << ReverseLookup (destAddress)
-                 << " IP: " << destAddress
-                 << " Message: " << pingMessage
-                 << " transactionId: " << transactionId);
-      Ptr<PingRequest> pingRequest = Create<PingRequest> (transactionId,
-                                                          Simulator::Now (),
-                                                          destAddress,
-                                                          pingMessage);
+      SEARCH_LOG ("Sending PING_REQ to Node: " << ReverseLookup(destAddress) << " IP: " << destAddress << " Message: " << pingMessage << " transactionId: " << transactionId);
+      Ptr<PingRequest> pingRequest = Create<PingRequest> (transactionId, Simulator::Now(), destAddress, pingMessage);
+      // Add to ping-tracker
       m_pingTracker.insert (std::make_pair (transactionId, pingRequest));
       Ptr<Packet> packet = Create<Packet> ();
-      PennSearchMessage message = PennSearchMessage (PennSearchMessage::PING_REQ,
-                                                     transactionId);
+      PennSearchMessage message = PennSearchMessage (PennSearchMessage::PING_REQ, transactionId);
       message.SetPingReq (pingMessage);
       packet->AddHeader (message);
-      m_socket->SendTo (packet, 0, InetSocketAddress (destAddress, m_appPort));
+      m_socket->SendTo (packet, 0 , InetSocketAddress (destAddress, m_appPort));
     }
+
+
 }
 
 void
@@ -385,381 +270,59 @@ PennSearch::RecvMessage (Ptr<Socket> socket)
 
   switch (message.GetMessageType ())
     {
-    case PennSearchMessage::PING_REQ:
-      ProcessPingReq (message, sourceAddress, sourcePort);
-      break;
-    case PennSearchMessage::PING_RSP:
-      ProcessPingRsp (message, sourceAddress, sourcePort);
-      break;
-
-    // MS2: Search
-    case PennSearchMessage::SEARCH_REQ:
-      ProcessSearchReq (message, sourceAddress, sourcePort);
-      break;
-    case PennSearchMessage::SEARCH_RSP:
-      ProcessSearchRsp (message, sourceAddress, sourcePort);
-      break;
-
-    // MS2: Publish / Store
-    case PennSearchMessage::PUBLISH_REQ:
-      ProcessPublishReq (message, sourceAddress, sourcePort);
-      break;
-    case PennSearchMessage::STORE_REQ:
-      ProcessStoreReq (message, sourceAddress, sourcePort);
-      break;
-
-    default:
-      ERROR_LOG ("Unknown Message Type!");
-      break;
+      case PennSearchMessage::PING_REQ:
+        ProcessPingReq (message, sourceAddress, sourcePort);
+        break;
+      case PennSearchMessage::PING_RSP:
+        ProcessPingRsp (message, sourceAddress, sourcePort);
+        break;
+      case PennSearchMessage::PUBLISH_REQ:
+        ProcessPublishReq (message, sourceAddress, sourcePort);
+        break;
+      case PennSearchMessage::PUBLISH_RSP: // FIX: Corrected enum name
+        ProcessPublishRsp (message, sourceAddress, sourcePort);
+        break;
+      case PennSearchMessage::REJOIN_REQ: // FIX: Corrected enum name
+        ProcessRejoin(message, sourceAddress, sourcePort);
+        break;
+      case PennSearchMessage::SEARCH_REQ:
+        // ERROR_LOG("RECIEVED SEACRCH REQ")
+        ProcessSearchReq(message, sourceAddress, sourcePort);
+        break;
+      case PennSearchMessage::SEARCH_RSP:
+        ProcessSearchRsp(message, sourceAddress, sourcePort);
+        break;
+      default:
+        ERROR_LOG ("Unknown Message Type!");
+        break;
     }
 }
 
-/* ============================================================================
-   MS2 SEARCH REQUEST AND RESPONSE HANDLING
-   ============================================================================ */
-
 void
-PennSearch::ProcessSearchReq (PennSearchMessage message,
-                              Ipv4Address source,
-                              uint16_t port)
+PennSearch::ProcessPingReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
 {
-  auto req = message.GetSearchReq ();
 
-  SEARCH_LOG ("SEARCH_REQ keyword=" << req.currentKeyword
-             << " remaining=" << req.remainingTerms
-             << " currentDocs=" << req.currentDocs
-             << " origin=" << req.originIp);
-
-  // 1) Lookup local docs for this keyword
-  std::string localDocs;
-  auto it = m_invertedList.find (req.currentKeyword);
-  if (it != m_invertedList.end ())
-    {
-      localDocs = SetToString (it->second);
-    }
-
-  // 2) Merge local docs with incoming doc set
-  std::string merged = CombineSearchResults (req.currentDocs, localDocs);
-
-  // 3) Log inverted list shipment for this keyword
-  std::vector<std::string> mergedDocs;
-  {
-    std::stringstream ss (merged);
-    std::string tok;
-    while (ss >> tok)
-      {
-        mergedDocs.push_back (tok);
-      }
-  }
-
-  SEARCH_LOG (GraderLogs::GetInvertedListShipLogStr (req.currentKeyword,
-                                                     mergedDocs));
-
-  // 4) Continue the multi-keyword workflow
-  ContinueSearch (req.currentKeyword,
-                  merged,
-                  req.remainingTerms,
-                  req.originIp);
+    // Use reverse lookup for ease of debug
+    std::string fromNode = ReverseLookup (sourceAddress);
+    SEARCH_LOG ("Received PING_REQ, From Node: " << fromNode << ", Message: " << message.GetPingReq().pingMessage);
+    // Send Ping Response
+    PennSearchMessage resp = PennSearchMessage (PennSearchMessage::PING_RSP, message.GetTransactionId());
+    resp.SetPingRsp (message.GetPingReq().pingMessage);
+    Ptr<Packet> packet = Create<Packet> ();
+    packet->AddHeader (resp);
+    m_socket->SendTo (packet, 0 , InetSocketAddress (sourceAddress, sourcePort));
 }
 
 void
-PennSearch::ProcessSearchRsp (PennSearchMessage message,
-                              Ipv4Address source,
-                              uint16_t port)
+PennSearch::ProcessPingRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
 {
-  auto rsp = message.GetSearchRsp ();
-
-  // Convert finalDocs string into vector<string> for grader log
-  std::vector<std::string> docs;
-  {
-    std::stringstream ss (rsp.finalDocs);
-    std::string tok;
-    while (ss >> tok)
-      {
-        docs.push_back (tok);
-      }
-  }
-
-  Ipv4Address originAddr (rsp.originIp.c_str ());
-
-  SEARCH_LOG (GraderLogs::GetSearchResultsLogStr (originAddr, docs));
-}
-
-/* ============================================================================
-   ContinueSearch: drives multi-keyword intersection.
-   If remainingTerms is empty, returns SEARCH_RSP to origin.
-   Otherwise, starts a new Chord lookup for the next keyword owner.
-   ============================================================================ */
-void
-PennSearch::ContinueSearch (const std::string &keyword,
-                            const std::string &currentDocs,
-                            const std::string &remainingTerms,
-                            const std::string &originIp)
-{
-  SEARCH_LOG ("ContinueSearch docs=" << currentDocs
-             << " remaining=" << remainingTerms);
-
-  // Base case: no more keywords -> send SEARCH_RSP back to origin
-  if (remainingTerms == "")
-    {
-      PennSearchMessage rsp (PennSearchMessage::SEARCH_RSP, GetNextTransactionId ());
-      rsp.SetSearchRsp (originIp, currentDocs);
-
-      Ptr<Packet> p = Create<Packet> ();
-      p->AddHeader (rsp);
-
-      Ipv4Address dest (originIp.c_str ());
-      m_socket->SendTo (p, 0, InetSocketAddress (dest, m_appPort));
-      return;
-    }
-
-  // Extract next keyword and tail of remainingTerms
-  std::string nextKeyword;
-  std::string nextRemaining;
-  {
-    std::stringstream ss (remainingTerms);
-    ss >> nextKeyword;
-    std::getline (ss, nextRemaining);
-    if (!nextRemaining.empty () && nextRemaining[0] == ' ')
-      {
-        nextRemaining.erase (0, 1);
-      }
-  }
-
-  // Encode context for the next Chord lookup
-  std::string ctx =
-    nextKeyword + "|" +
-    currentDocs + "|" +
-    nextRemaining + "|" +
-    originIp;
-
-  uint32_t hash = PennKeyHelper::CreateShaKey (nextKeyword);
-  m_chord->StartSearchLookup (ctx, hash);
-}
-
-/* ============================================================================
-   MS2 SEARCH CHORD LOOKUP CALLBACK
-   Called when Chord resolves the owner for a given keyword.
-   We then ship a SEARCH_REQ (with currentDocs and remainingTerms)
-   over to that owner.
-   ============================================================================ */
-void
-PennSearch::HandleSearchChordLookup (std::string ctx, Ipv4Address owner)
-{
-  std::vector<std::string> parts;
-
-  {
-    std::stringstream ss (ctx);
-    std::string x;
-    while (std::getline (ss, x, '|'))
-      {
-        parts.push_back (x);
-      }
-  }
-
-  if (parts.size () != 4)
-    {
-      ERROR_LOG ("Invalid search context");
-      return;
-    }
-
-  std::string nextKeyword    = parts[0];
-  std::string currentDocs    = parts[1];
-  std::string remainingTerms = parts[2];
-  std::string originIp       = parts[3];
-
-  // Here we simply forward the search request to the owner.
-  // The actual inverted-list shipping log now happens in ProcessSearchReq,
-  // after the owner has combined its local docs.
-  PennSearchMessage req (PennSearchMessage::SEARCH_REQ, GetNextTransactionId ());
-  req.SetSearchReq (originIp, remainingTerms, currentDocs, nextKeyword);
-
-  Ptr<Packet> p = Create<Packet> ();
-  p->AddHeader (req);
-
-  m_socket->SendTo (p, 0, InetSocketAddress (owner, m_appPort));
-}
-
-/* ============================================================================
-   MS2 INVERTED LIST PUBLISH LOGIC
-   ============================================================================ */
-
-void
-PennSearch::ProcessPublishReq (PennSearchMessage message,
-                               Ipv4Address source,
-                               uint16_t port)
-{
-  auto pr = message.GetPublishReq ();
-
-  uint32_t hash = PennKeyHelper::CreateShaKey (pr.keyword);
-  m_chord->StartPublishLookup (pr.keyword, pr.docId, hash);
-
-  SEARCH_LOG (GraderLogs::GetPublishLogStr (pr.keyword, pr.docId));
-}
-
-void
-PennSearch::HandlePublishChordLookup (std::string keyword,
-                                      std::string docId,
-                                      Ipv4Address owner)
-{
-  if (owner == m_local)
-    {
-      // We are the owner: store locally
-      m_invertedList[keyword].insert (docId);
-
-      SEARCH_LOG (GraderLogs::GetStoreLogStr (keyword, docId));
-      return;
-    }
-
-  // Otherwise, send STORE_REQ to the owner
-  PennSearchMessage m (PennSearchMessage::STORE_REQ, GetNextTransactionId ());
-  m.SetStoreReq (keyword, docId);
-
-  Ptr<Packet> p = Create<Packet> ();
-  p->AddHeader (m);
-
-  m_socket->SendTo (p, 0, InetSocketAddress (owner, m_appPort));
-}
-
-void
-PennSearch::ProcessStoreReq (PennSearchMessage message,
-                             Ipv4Address source,
-                             uint16_t port)
-{
-  auto s = message.GetStoreReq ();
-  m_invertedList[s.keyword].insert (s.docId);
-
-  SEARCH_LOG (GraderLogs::GetStoreLogStr (s.keyword, s.docId));
-}
-
-/* ============================================================================
-   UTILITY FOR LOGGING SETS (used in search and publish)
-   ============================================================================ */
-
-std::string
-PennSearch::SetToString (const std::set<std::string> &s)
-{
-  std::string out;
-  for (auto &x : s)
-    {
-      if (!out.empty ()) out += " ";
-      out += x;
-    }
-  return out;
-}
-
-/* --------------------------------------------------------------------------
-   Helper: Intersect two space-separated doc lists
-   Example:
-       a = "a b c"
-       b = "b c d"
-       => "b c"
-   -------------------------------------------------------------------------- */
-std::string
-PennSearch::IntersectDocLists (const std::string &a,
-                               const std::string &b)
-{
-  std::set<std::string> A, B, R;
-
-  if (!a.empty ())
-    {
-      std::stringstream ss (a);
-      std::string tok;
-      while (std::getline (ss, tok, ' '))
-        {
-          if (!tok.empty ()) A.insert (tok);
-        }
-    }
-
-  if (!b.empty ())
-    {
-      std::stringstream ss (b);
-      std::string tok;
-      while (std::getline (ss, tok, ' '))
-        {
-          if (!tok.empty ()) B.insert (tok);
-        }
-    }
-
-  for (auto &x : A)
-    {
-      if (B.count (x)) R.insert (x);
-    }
-
-  return SetToString (R);
-}
-
-std::string
-PennSearch::CombineSearchResults (const std::string &existing,
-                                  const std::string &next)
-{
-  if (existing == "")
-    {
-      // First keyword: just take whatever this node has
-      return next;
-    }
-
-  return IntersectDocLists (existing, next);
-}
-
-// Optional initialization hook
-void
-PennSearch::InitializeSearchLayer ()
-{
-  m_invertedList.clear ();
-}
-
-/* ============================================================================
-   STUBS
-   ============================================================================ */
-void
-PennSearch::ChordLookupForwardingStub (const std::string &keyword,
-                                       const std::string &docs,
-                                       const std::string &remaining,
-                                       const std::string &originIp,
-                                       Ipv4Address nextHop)
-{
-  SEARCH_LOG ("[STUB] Chord forwarding stub invoked");
-}
-
-void
-PennSearch::DistributedInvertedListMaintenanceStub ()
-{
-  SEARCH_LOG ("[STUB] Inverted list maintenance");
-}
-
-/* ============================================================================
-   PING HANDLERS
-   ============================================================================ */
-
-void
-PennSearch::ProcessPingReq (PennSearchMessage message,
-                            Ipv4Address sourceAddress,
-                            uint16_t sourcePort)
-{
-  std::string fromNode = ReverseLookup (sourceAddress);
-  SEARCH_LOG ("Received PING_REQ, From Node: " << fromNode
-             << ", Message: " << message.GetPingReq ().pingMessage);
-  PennSearchMessage resp = PennSearchMessage (PennSearchMessage::PING_RSP,
-                                              message.GetTransactionId ());
-  resp.SetPingRsp (message.GetPingReq ().pingMessage);
-  Ptr<Packet> packet = Create<Packet> ();
-  packet->AddHeader (resp);
-  m_socket->SendTo (packet, 0, InetSocketAddress (sourceAddress, sourcePort));
-}
-
-void
-PennSearch::ProcessPingRsp (PennSearchMessage message,
-                            Ipv4Address sourceAddress,
-                            uint16_t sourcePort)
-{
+  // Remove from pingTracker
   std::map<uint32_t, Ptr<PingRequest> >::iterator iter;
   iter = m_pingTracker.find (message.GetTransactionId ());
   if (iter != m_pingTracker.end ())
     {
       std::string fromNode = ReverseLookup (sourceAddress);
-      SEARCH_LOG ("Received PING_RSP, From Node: " << fromNode
-                 << ", Message: " << message.GetPingRsp ().pingMessage);
+      SEARCH_LOG ("Received PING_RSP, From Node: " << fromNode << ", Message: " << message.GetPingRsp().pingMessage);
       m_pingTracker.erase (iter);
     }
   else
@@ -772,16 +335,13 @@ void
 PennSearch::AuditPings ()
 {
   std::map<uint32_t, Ptr<PingRequest> >::iterator iter;
-  for (iter = m_pingTracker.begin (); iter != m_pingTracker.end ();)
+  for (iter = m_pingTracker.begin () ; iter != m_pingTracker.end();)
     {
       Ptr<PingRequest> pingRequest = iter->second;
-      if (pingRequest->GetTimestamp ().GetMilliSeconds ()
-          + m_pingTimeout.GetMilliSeconds ()
-          <= Simulator::Now ().GetMilliSeconds ())
+      if (pingRequest->GetTimestamp().GetMilliSeconds() + m_pingTimeout.GetMilliSeconds() <= Simulator::Now().GetMilliSeconds())
         {
-          DEBUG_LOG ("Ping expired. Message: " << pingRequest->GetPingMessage ()
-                     << " Timestamp: " << pingRequest->GetTimestamp ().GetMilliSeconds ()
-                     << " CurrentTime: " << Simulator::Now ().GetMilliSeconds ());
+          DEBUG_LOG ("Ping expired. Message: " << pingRequest->GetPingMessage () << " Timestamp: " << pingRequest->GetTimestamp().GetMilliSeconds () << " CurrentTime: " << Simulator::Now().GetMilliSeconds ());
+          // Remove stale entries
           m_pingTracker.erase (iter++);
         }
       else
@@ -789,7 +349,8 @@ PennSearch::AuditPings ()
           ++iter;
         }
     }
-  m_auditPingsTimer.Schedule (m_pingTimeout);
+  // Rechedule timer
+  m_auditPingsTimer.Schedule (m_pingTimeout); 
 }
 
 uint32_t
@@ -798,53 +359,178 @@ PennSearch::GetNextTransactionId ()
   return m_currentTransactionId++;
 }
 
-/* ============================================================================
-   Chord ping callbacks
-   ============================================================================ */
+// lookup logic
+void
+PennSearch::Lookup(uint32_t hashToFind)
+{
+  uint32_t transactionId = GetNextTransactionId();
+
+  m_lookupTracker[transactionId] = hashToFind;
+
+  m_chord->ChordLookup(transactionId, hashToFind);
+}
+
+void
+PennSearch::HandleLookupResult(Ipv4Address owner, uint32_t transactionId)
+{
+  auto it = m_lookupTracker.find(transactionId);
+
+  if (it != m_lookupTracker.end()) {
+    uint32_t hashToFind = m_lookupTracker[transactionId];
+
+    m_lookupTracker.erase(transactionId);
+
+    ProcessLookupResult(owner, hashToFind);
+  }
+}
+
+void 
+PennSearch::ProcessLookupResult(Ipv4Address owner, uint32_t hashToFind)
+{
+  SEARCH_LOG("FOUND OWNER FOR HASH: " << PennKeyHelper::KeyToHexString(hashToFind) << " AT NODE: " << m_chord->ReverseLookup(owner) << " WITH HASH: " << PennKeyHelper::KeyToHexString(PennKeyHelper::CreateShaKey(owner)));
+}
+
+// Handle Chord Callbacks
 
 void
 PennSearch::HandleChordPingFailure (Ipv4Address destAddress, std::string message)
 {
-  SEARCH_LOG ("Chord Ping Expired! Destination nodeId: "
-              << ReverseLookup (destAddress)
-              << " IP: " << destAddress
-              << " Message: " << message);
+  SEARCH_LOG ("Chord Ping Expired! Destination nodeId: " << ReverseLookup(destAddress) << " IP: " << destAddress << " Message: " << message);
 }
 
 void
 PennSearch::HandleChordPingSuccess (Ipv4Address destAddress, std::string message)
 {
-  SEARCH_LOG ("Chord Ping Success! Destination nodeId: "
-              << ReverseLookup (destAddress)
-              << " IP: " << destAddress
-              << " Message: " << message);
-  // Send ping via search layer
+  SEARCH_LOG ("Chord Ping Success! Destination nodeId: " << ReverseLookup(destAddress) << " IP: " << destAddress << " Message: " << message);
+  // Send ping via search layer 
   SendPennSearchPing (destAddress, message);
 }
 
 void
 PennSearch::HandleChordPingRecv (Ipv4Address destAddress, std::string message)
 {
-  SEARCH_LOG ("Chord Layer Received Ping! Source nodeId: "
-              << ReverseLookup (destAddress)
-              << " IP: " << destAddress
-              << " Message: " << message);
+  SEARCH_LOG ("Chord Layer Received Ping! Source nodeId: " << ReverseLookup(destAddress) << " IP: " << destAddress << " Message: " << message);
 }
 
-/* ============================================================================
-   Verbosity toggles
-   ============================================================================ */
+// FIX: Added missing implementations for generic lookup handlers
+void
+PennSearch::HandleChordLookupSuccess(uint32_t tid, Ipv4Address owner)
+{
+    // If the transaction ID is in the generic tracker, run the old logic
+    if (m_lookupTracker.count(tid))
+    {
+        HandleLookupResult(owner, tid);
+        return;
+    }
+    // Handle Publish/Search lookups that used the specialized Start...Lookup method names
+    
+    // 1. Check pending publishes
+    auto publishIt = m_pendingPublishes.find(tid);
+    if (publishIt != m_pendingPublishes.end()) {
+        std::string keyword = publishIt->second.first;
+        std::vector<std::string> docIDs = publishIt->second.second;
+
+        for (const auto& docID : docIDs) {
+          SEARCH_LOG(GraderLogs::GetPublishLogStr(keyword, docID));
+        }
+
+        PennSearchMessage req = PennSearchMessage(PennSearchMessage::PUBLISH_REQ, tid);
+        req.SetPublishReq(keyword, docIDs); // FIX: docIDs is a vector
+        Ptr<Packet> packet = Create<Packet>();
+        packet->AddHeader(req);
+        m_socket->SendTo(packet, 0, InetSocketAddress(owner, m_appPort));
+        m_pendingPublishes.erase(publishIt);
+        return;
+    }
+
+    // 2. Check pending rejoins
+    auto rejoinIt = m_pendingRejoin.find(tid);
+    if (rejoinIt != m_pendingRejoin.end()) {
+        if (owner != GetLocalAddress()) {
+            std::string keyword = rejoinIt->second.first;
+            std::vector<std::string> docIDs = rejoinIt->second.second;
+
+            for (const auto& docID : docIDs) {
+              SEARCH_LOG(GraderLogs::GetPublishLogStr(keyword, docID));
+            }
+
+            PennSearchMessage req = PennSearchMessage(PennSearchMessage::PUBLISH_REQ, tid);
+            req.SetPublishReq(keyword, docIDs); // FIX: docIDs is a vector
+            Ptr<Packet> packet = Create<Packet>();
+            packet->AddHeader(req);
+            m_socket->SendTo(packet, 0, InetSocketAddress(owner, m_appPort));
+            // m_pendingRejoin.erase(rejoinIt); // Keep until all keys are published
+        }
+        return;
+    }
+
+    // 3. Check pending searches
+    auto searchIt = m_pendingSearches.find(tid);
+    if (searchIt != m_pendingSearches.end()) {
+        auto &tuple = searchIt->second;
+        auto &keywords = std::get<0>(tuple);
+        auto &docIds = std::get<1>(tuple);
+        Ipv4Address requester = std::get<2>(tuple);
+        uint32_t keywordIndex = std::get<3>(tuple);
+        const std::string &kw = keywords[keywordIndex];
+
+        // If the owner is the local node and we don't have the key, return empty result
+        if (owner == GetLocalAddress() && m_invertedIndex.find(kw) == m_invertedIndex.end())
+        {
+          PennSearchMessage resp(PennSearchMessage::SEARCH_RSP, tid);
+          std::vector<std::string> empty;
+          resp.SetSearchRsp(requester, empty); 
+          Ptr<Packet> pkt = Create<Packet>();
+          pkt->AddHeader(resp);
+          m_socket->SendTo(pkt, 0, InetSocketAddress(requester, m_appPort));
+          m_pendingSearches.erase(searchIt);
+          return;
+        }
+
+        // Forward SEARCH_REQ to "owner"
+        PennSearchMessage fwd(PennSearchMessage::SEARCH_REQ, tid);
+        fwd.SetSearchReq(requester, keywords, docIds, keywordIndex); // FIX: All fields are correct types now
+        Ptr<Packet> pkt = Create<Packet>();
+        pkt->AddHeader(fwd);
+        m_socket->SendTo(pkt, 0, InetSocketAddress(owner, m_appPort));
+        m_pendingSearches.erase(tid);
+        return;
+    }
+}
+
+void
+PennSearch::HandleChordLookupFailure(uint32_t tid)
+{
+    // Check if this was a pending search and return empty results if so.
+    auto it = m_pendingSearches.find(tid);
+    if (it != m_pendingSearches.end()) {
+        // unpack the tuple
+        Ipv4Address requester = std::get<2>(it->second);
+        
+        PennSearchMessage resp(PennSearchMessage::SEARCH_RSP, tid);
+        std::vector<std::string> empty;
+        resp.SetSearchRsp(requester, empty); 
+        Ptr<Packet> packet = Create<Packet>();
+        packet->AddHeader(resp);
+        m_socket->SendTo(packet, 0, InetSocketAddress(requester, m_appPort));
+
+        m_pendingSearches.erase(it);
+    }
+    // Do nothing for publish or rejoin failures for now (rely on retries if implemented later)
+}
+
+// Override PennLog
 
 void
 PennSearch::SetTrafficVerbose (bool on)
-{
+{ 
   m_chord->SetTrafficVerbose (on);
   g_trafficVerbose = on;
 }
 
 void
 PennSearch::SetErrorVerbose (bool on)
-{
+{ 
   m_chord->SetErrorVerbose (on);
   g_errorVerbose = on;
 }
@@ -875,4 +561,328 @@ PennSearch::SetSearchVerbose (bool on)
 {
   m_chord->SetSearchVerbose (on);
   g_searchVerbose = on;
+}
+
+/** PUBLISH AND LOOKUP LOGIC **/
+
+/**
+ * Publish metadata file to map: <transaction id, <keyword, docID>>
+ * 1) Read file, build invertedLists: keyword → all docIDs
+ * 2) For each unique keyword, fire exactly one Chord lookup and map tid → (keyword, all its docIDs)
+ * \param filename The metadata file to publish
+ */
+void
+PennSearch::PublishMetadataFile(std::string filepath)
+{
+  // we provide the filepath in the command line
+  std::ifstream in(filepath);
+  if (!in.is_open()) {
+    ERROR_LOG("Failed to open metadata file: " << filepath);
+    return;
+  }
+
+  // 1) Read file, build invertedLists: keyword → all docIDs
+  std::map<std::string, std::vector<std::string>> invertedLists;
+  std::string line;
+  while (std::getline(in, line)) {
+    std::istringstream iss(line);
+    std::string docID;
+    iss >> docID;
+    std::string kw;
+    while (iss >> kw) {
+      // check if docID is already in vector for this keyword
+      if (std::find(invertedLists[kw].begin(), invertedLists[kw].end(), docID) == invertedLists[kw].end()) {
+        invertedLists[kw].push_back(docID);
+      }
+    }
+  }
+  in.close();
+
+  // 2) For each unique keyword, fire exactly one Chord lookup and map tid → (keyword, all its docIDs)
+  for (auto const& entry : invertedLists) {
+    // get keyword and docIDs
+    const std::string& keyword = entry.first;
+    const auto& docIDs = entry.second;
+    uint32_t key = PennKeyHelper::CreateShaKey(keyword);
+
+    // fire Chord lookup
+    // map tid → (keyword, all its docIDs)
+    uint32_t transactionId = GetNextTransactionId();
+    // stash the whole vector of docIDs under this tid
+    m_pendingPublishes[transactionId] = std::make_pair(keyword, docIDs);
+    m_chord->ChordLookup(transactionId, key);
+  }
+}
+
+/* SEARCH LOGIC */
+
+/**
+ * Process search request
+ * \param message The search request message
+ * \param sourceAddress The source address of the search request
+ * \param sourcePort The source port of the search request
+ */
+void
+PennSearch::ProcessSearchReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
+{
+  // unpack search request
+  PennSearchMessage::SearchReq req = message.GetSearchReq();
+  std::vector<std::string> keywords = req.keywords;
+  Ipv4Address requester = req.requester;
+  uint32_t keywordIndex = req.keywordIndex;
+  std::vector<std::string> docIDs = req.returnDocs;
+  uint32_t tid = message.GetTransactionId();
+
+  // check if the keywords are empty
+  if (keywords.empty()) {
+    ERROR_LOG("No keywords provided for search");
+    return;
+  }
+
+  if (keywordIndex >= keywords.size()) {
+    ERROR_LOG("Invalid keywordIndex: " << keywordIndex << " for keywords of size " << keywords.size());
+    return;
+  }
+
+  std::string currentKeyword = keywords[keywordIndex];
+
+  auto it = m_invertedIndex.find(currentKeyword);
+
+  // this means we have the keyword in the inverted index of the current node
+  if (it != m_invertedIndex.end()) {
+    // this is the set of docIDs that will be returned
+    std::set<std::string> docSet(docIDs.begin(), docIDs.end());
+
+    // if it's the first keyword, then just insert the docs from the inverted index
+    if (keywordIndex == 0) {
+      docSet.insert(it->second.begin(), it->second.end());
+    } 
+    // for subsequent keywords, intersect the current docSet with the new keyword's documents
+    else {
+        std::set<std::string> currentDocs(it->second.begin(), it->second.end());
+        std::set<std::string> intersection;
+
+        // this is to make sure we only return the docs that are in both the current keyword and the new keyword
+        // rather than the union of the two sets
+        std::set_intersection(docSet.begin(), docSet.end(),
+                              currentDocs.begin(), currentDocs.end(),
+                              std::inserter(intersection, intersection.begin()));
+        docSet = intersection;
+    }
+
+    // assign the docIDs to the docIDs vector
+    docIDs.assign(docSet.begin(), docSet.end());
+
+    // log the inverted list ship for grader
+    SEARCH_LOG(GraderLogs::GetInvertedListShipLogStr(currentKeyword, docIDs));
+
+    // iterate to the next keyword
+    keywordIndex++;
+
+    // if there are no more keywords to search, then send a search response back to who requested it
+    // this means we have the final set of docIDs to return
+    if(keywordIndex >= keywords.size()) {
+      // all keywords have been searched, send back the results
+      // we only log in the grader logs in search rsp
+      PennSearchMessage resp = PennSearchMessage(PennSearchMessage::SEARCH_RSP, tid);
+      resp.SetSearchRsp(requester, docIDs);
+      Ptr<Packet> packet = Create<Packet>();
+      packet->AddHeader(resp);
+      m_socket->SendTo(packet, 0, InetSocketAddress(requester, m_appPort));
+      return;
+  }
+    // otherwise, send a search request to the next keyword in the list 
+    else {
+      std::string nextKeyword = keywords[keywordIndex];
+      uint32_t key = PennKeyHelper::CreateShaKey(nextKeyword);
+      uint32_t newTid = GetNextTransactionId();
+      m_pendingSearches[newTid] = std::make_tuple(keywords, docIDs, requester, keywordIndex);
+      m_chord->ChordLookup(newTid, key); 
+    }
+  }
+  // if we don't own the keyword, then we need to send a search request to the next node
+  else
+  {
+    std::string nextKeyword = keywords[keywordIndex];
+    uint32_t key = PennKeyHelper::CreateShaKey(nextKeyword);
+
+    m_pendingSearches[tid] = std::make_tuple(keywords, docIDs, requester, keywordIndex);
+    m_chord->ChordLookup(tid, key);
+  }
+
+}
+
+/**
+ * Process search response
+ * \param message The search response message
+ * \param sourceAddress The source address of the search response
+ * \param sourcePort The source port of the search response
+ */
+void
+PennSearch::ProcessSearchRsp(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
+{
+  // unpack search response
+  auto rsp = message.GetSearchRsp();
+  auto results = rsp.results; 
+  auto requester = rsp.requester; 
+
+  // log search results for grader
+  SEARCH_LOG(GraderLogs::GetSearchResultsLogStr(requester, results));
+}
+
+
+/**
+ * Process publish request
+ * Append docID into node's in-memory inverted index, log the "STORE" event, and ack the sender with a PUBLISH_RSP.
+ * \param message The publish request message
+ * \param sourceAddress The source address of the publish request
+ * \param sourcePort The source port of the publish request
+ */
+void
+PennSearch::ProcessPublishReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
+{
+  // unpack publish request
+  auto publish_req = message.GetPublishReq();
+  std::string keyword = publish_req.keyword;
+  std::vector<std::string> docIDs = publish_req.docID;
+  uint32_t tid = message.GetTransactionId();
+
+  // store in local inverted index
+  // if the keyword is not in the inverted index, create a new vector
+  if (m_invertedIndex.find(keyword) == m_invertedIndex.end()) {
+    m_invertedIndex[keyword] = std::vector<std::string>();
+  }
+  
+  for (const auto& docID : docIDs) {
+    if (m_invertedIndex.find(keyword) == m_invertedIndex.end()) {
+      m_invertedIndex[keyword] = std::vector<std::string>();
+    }
+    m_invertedIndex[keyword].push_back(docID);
+    SEARCH_LOG(GraderLogs::GetStoreLogStr(keyword, docID));
+  }
+
+  // send back publish response
+  PennSearchMessage resp = PennSearchMessage(PennSearchMessage::PUBLISH_RSP, tid);
+  resp.SetPublishRsp();
+
+  Ptr<Packet> packet = Create<Packet>();
+  packet->AddHeader(resp);
+  m_socket->SendTo(packet, 0, InetSocketAddress(sourceAddress, sourcePort));
+}
+
+/**
+ * Process publish response
+ * When the original publisher sees the ack, it clears that tid from m_pendingPublishes
+ * \param message The publish response message
+ * \param sourceAddress The source address of the publish response
+ */
+void
+PennSearch::ProcessPublishRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
+{
+  // we're handling the clean up in the process publish request for now
+}
+
+/* LEAVE LOGIC */
+
+/**
+ * Handle leave request
+ * Publish all the data to the successor
+ * \param successorIp The successor IP address
+ */
+void
+PennSearch::HandleLeave(Ipv4Address successorIp)
+{
+  // publish all the data to the successor
+  for (const auto& entry : m_invertedIndex)
+  {
+    const std::string& keyword = entry.first;
+    const std::vector<std::string>& docs = entry.second;
+
+    PennSearchMessage msg = PennSearchMessage(PennSearchMessage::PUBLISH_REQ, GetNextTransactionId());
+    msg.SetPublishReq(keyword, docs);
+    Ptr<Packet> pkt = Create<Packet>();
+    pkt->AddHeader(msg);
+    m_socket->SendTo(pkt, 0, InetSocketAddress(successorIp, m_appPort));
+
+    // log publish for grader
+    for (const auto& docID : docs) {
+      SEARCH_LOG(GraderLogs::GetPublishLogStr(keyword, docID));
+    }
+  }
+
+  m_invertedIndex.clear();
+}
+
+/* REJOIN LOGIC */
+
+/**
+ * Handle rejoin request
+ * Send rejoin request to successor
+ * \param successorIp The successor IP address
+ */
+void
+PennSearch::HandleRejoin(Ipv4Address successorIp)
+{
+  // send rejoin request to successor
+  PennSearchMessage msg = PennSearchMessage(PennSearchMessage::REJOIN_REQ, GetNextTransactionId());
+  msg.SetRejoinReq(GetLocalAddress());
+  Ptr<Packet> pkt = Create<Packet>();
+  pkt->AddHeader(msg);
+  m_socket->SendTo(pkt, 0, InetSocketAddress(successorIp, m_appPort));
+}
+
+/**
+ * Process rejoin request
+ * Lookup keyword and send lookup request to successor
+ * \param message The rejoin request message
+ * \param sourceAddress The source address of the rejoin request
+ * \param sourcePort The source port of the rejoin request
+ */
+void 
+PennSearch::ProcessRejoin(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
+{ 
+  // lookup keyword
+  for (const auto& entry : m_invertedIndex)
+  {
+    const std::string& keyword = entry.first;
+    const auto& docs = entry.second;
+
+    // lookup keyword
+    uint32_t key = PennKeyHelper::CreateShaKey(keyword);
+    
+    // fire Chord lookup
+    // map tid → (keyword, all its docIDs)
+    uint32_t transactionId = GetNextTransactionId();
+    // stash the whole vector of docIDs under this tid
+    m_pendingRejoin[transactionId] = std::make_pair(keyword, docs);
+    m_chord->ChordLookup(transactionId, key);
+  }
+}
+
+// FIX: Added TransferKeys implementation
+void PennSearch::TransferKeys(Ipv4Address newOwner, Ipv4Address oldOwner)
+{
+    // This is the application layer's handling of Chord's key transfer signal (on join/leave)
+    // In this simplified model, we publish everything to the new owner, and the new owner handles deduplication.
+
+    if (newOwner != GetLocalAddress()) // If I am not the new owner, I should be transferring my keys.
+    {
+        for (const auto& entry : m_invertedIndex)
+        {
+            const std::string& keyword = entry.first;
+            const std::vector<std::string>& docs = entry.second;
+
+            // Send a publish request to the new owner for all my keys (simplified transfer).
+            PennSearchMessage msg = PennSearchMessage(PennSearchMessage::PUBLISH_REQ, GetNextTransactionId());
+            msg.SetPublishReq(keyword, docs);
+            Ptr<Packet> pkt = Create<Packet>();
+            pkt->AddHeader(msg);
+            m_socket->SendTo(pkt, 0, InetSocketAddress(newOwner, m_appPort));
+            
+            // Log publish for grader (as key transfer results in store messages elsewhere)
+            for (const auto& docID : docs) {
+              SEARCH_LOG(GraderLogs::GetPublishLogStr(keyword, docID));
+            }
+        }
+    }
 }
