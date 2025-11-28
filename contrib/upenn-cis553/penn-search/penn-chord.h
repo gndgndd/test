@@ -34,12 +34,7 @@
 #include "ns3/timer.h"
 #include "ns3/uinteger.h"
 #include "ns3/boolean.h"
-#include <algorithm>
-#include <vector>
-#include <set>
-#include <sstream>
-#include <iomanip>
-
+#include <unordered_map>
 
 using namespace ns3;
 
@@ -63,88 +58,120 @@ class PennChord : public PennApplication
     void SetPingFailureCallback (Callback <void, Ipv4Address, std::string> pingFailureFn);
     void SetPingRecvCallback (Callback <void, Ipv4Address, std::string> pingRecvFn);
 
+    // Lookup callbacks
+    void SetLookupSuccessCallback(Callback <void, uint32_t, Ipv4Address> lookupSuccessFn);
+    void SetLookupFailureCallback(Callback <void, uint32_t> lookupFailureFn);
+
+    // Leave / rejoin callbacks
+    void SetLeaveCallback(Callback<void, Ipv4Address> leaveCb);
+    void SetRejoinCallback(Callback<void, Ipv4Address> rejoinCb);
+
     // From PennApplication
     virtual void ProcessCommand (std::vector<std::string> tokens);
-    // MS2A ADDITIONS
-    // PennSearch must register a callback so Chord can notify when lookup finishes
-    void SetLookupResultCallback(Callback<void, uint32_t, Ipv4Address> lookupResultFn);
-    // PennSearch triggers a lookup by calling this method
-    void IssueChordLookup(uint32_t keyHash, Ipv4Address originator);
-    // MS2A: Search lookup callback (Chord returns contextKey and owner)
-    void SetSearchLookupCallback(Callback<void, std::string, Ipv4Address> cb);
-    // MS2A: Entry point for PennSearch to start a search lookup
-    void StartSearchLookup(std::string contextKey, uint32_t keyHash);
-    // Internal handlers for new lookup message types
-    void ProcessLookupReq(PennChordMessage message, Ipv4Address sourceAddress);
-    void ProcessLookupForward(PennChordMessage message, Ipv4Address sourceAddress);
-    void ProcessLookupRsp(PennChordMessage message, Ipv4Address sourceAddress);
-    // Publish lookup
-    void SetPublishLookupCallback(Callback<void, std::string, std::string, Ipv4Address> cb);
-    void StartPublishLookup(const std::string &keyword,const std::string &docId, uint32_t keyHash);
+    
+    // ----------- RING / CHORD API -----------
+    void ChordCreate();
+    void Join(Ipv4Address landmark);
 
-    // ---------------------------------------
+    void ProcessFindSuccessorReq (PennChordMessage message);
+    void ProcessFindSuccessorRsp (PennChordMessage message);
+
+    void Stabilize();
+    void ProcessStabilizeReq(PennChordMessage message);
+    void ProcessStabilizeRsp(PennChordMessage message);
+    bool IsInBetween(uint32_t start, uint32_t target, uint32_t end) const;
+
+    void ProcessNotifcationPkt(PennChordMessage message);
+
+    void RingState();
+    void ProcessRingStatePtk(PennChordMessage message);
+
+    void Leave();
+    void ProcessLeaveSuccessor(PennChordMessage message);
+    void ProcessLeavePredecessor(PennChordMessage message);
+
+    // lookup logic
+    void ChordLookup(uint32_t transactionId, uint32_t hashToFind);
+    void SetLookUpCallback(Callback<void, Ipv4Address, uint32_t> lookupCb);
 
   protected:
     virtual void DoDispose ();
-
+    
   private:
     virtual void StartApplication (void);
     virtual void StopApplication (void);
+
+    // hop count trackers (for lookups)
+    std::unordered_map<uint32_t, uint32_t> m_hopsPerLookup; // key: transactionId, value: hops
+    uint16_t m_totalHops = 0;
+    uint16_t m_numLookups = 0;
 
     uint32_t m_currentTransactionId;
     Ptr<Socket> m_socket;
     Time m_pingTimeout;
     uint16_t m_appPort;
+
     // Timers
     Timer m_auditPingsTimer;
+    Timer m_stabilizeTimer;
+
+    // finger table timer to call FixFingerTable
+    Timer m_fixFingerTimer;
+
     // Ping tracker
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
-    // Callbacks
+
+    // Ping callbacks
     Callback <void, Ipv4Address, std::string> m_pingSuccessFn;
     Callback <void, Ipv4Address, std::string> m_pingFailureFn;
     Callback <void, Ipv4Address, std::string> m_pingRecvFn;
 
-    // MS2A: lookup completion callback (Chord → PennSearch)
-    Callback<void, uint32_t, Ipv4Address> m_lookupResultFn;
-    // MS2A: track hop count / forwarding count per lookup
-    std::map<uint32_t, uint32_t> m_lookupHopCounter;
-    // MS2A: Map transaction id to saved context string
-    std::map<uint32_t, std::string> m_searchContext;
-    // MS2A: Callback to return lookup results to PennSearch
-    Callback<void, std::string, Ipv4Address> m_searchLookupFn;
-    // MS2A publish lookup support
-    std::map<uint32_t, std::pair<std::string, std::string>> m_publishContext;
-    Callback<void, std::string, std::string, Ipv4Address> m_publishLookupFn;
+    // Lookup callback into upper layer (if used)
+    Callback <void, Ipv4Address, uint32_t> m_lookupCallback;
 
-    // Milestone 1 - Create and Join - Sam
-     void CreateChord();
-     void LeaveChord();
-     void JoinChord(Ipv4Address referenceNode);
-     void Ringstate();
+    // successor, predecessor, and nodeHash
+    Ipv4Address m_predecessor;
+    Ipv4Address m_successor;
+    uint32_t m_nodeHash;
 
-     // ==============================================================
-     // Milestone 1 (Sal) – Part 2: Stabilization + Notify
-     // --------------------------------------------------------------
-     // Added fields and helper functions to maintain the Chord ring:
-     // successor, predecessor, and consistency logic (no finger tables yet).
-     // ==============================================================
+    // leave / rejoin callbacks
+    Callback<void, Ipv4Address> m_leaveCallback;
+    Callback<void, Ipv4Address> m_rejoinCallback;
+    void TriggerRejoinCallback();
+    bool m_leftChord = false;
 
-     void Stabilize ();                 // runs ring stabilization logic
-     void Notify (Ipv4Address node);    // updates predecessor if needed
-     bool IsBetween (Ipv4Address target, Ipv4Address start, Ipv4Address end); // helper for hash-space checks
+    // Lookup callbacks
+    Callback <void, uint32_t, Ipv4Address> m_lookupSuccessFn;
+    Callback <void, uint32_t> m_lookupFailureFn;
 
-     // Helpers
-     static std::string ToHexKey (uint32_t value);
-     Ipv4Address FindSuccessor (uint32_t id);
-     void SendRingstate (Ipv4Address target);
+    // transaction ID for a packet sent during a rejoin
+    uint32_t m_joinTransactionId;
 
-     Ipv4Address m_successor;           // node's immediate successor
-     Ipv4Address m_predecessor;         // node's immediate predecessor
+    // pending lookups (transactionId -> keyHash)
+    std::map<uint32_t, uint32_t> m_pendingLookups;
 
-     // Global ring tracking (simulated for M1)
-      static std::set<Ipv4Address> s_joined;
-      static std::map<Ipv4Address, Ipv4Address> m_successorPredecessor;
- };
+    // finger table entry struct
+    struct FingerTableEntry
+    {
+      uint32_t start;         // (nodeId + 2^i) % 2^32
+      uint32_t finger_id;     // id of successor of start
+      Ipv4Address finger_ip;  // ip of successor of start
+    };
 
- #endif
+    // finger table initialization
+    std::vector<FingerTableEntry> m_fingerTable;
 
+    // tracks finger table entries that are in the process of being fixed
+    std::map<uint32_t,uint32_t> m_pendingFingers;
+
+    uint32_t m_fingerTableSize;   // 32
+    uint32_t m_nextFingerToFix;   // cycles 0..31
+    bool m_fingerTableInitialized; // true if finger table is initialized
+
+    // finger table methods
+    void InitFingerTable();
+    void FixFingerTable();
+    int ClosestPrecedingFinger(uint32_t idToFind) const;
+};
+
+#endif
