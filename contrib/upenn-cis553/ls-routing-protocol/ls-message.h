@@ -38,9 +38,6 @@ class LSMessage : public Header
       {
       PING_REQ,
       PING_RSP,
-      HELLO_REQ,  // new
-      HELLO_RSP,  // new 
-      LSA_m,  //new
       };
 
     LSMessage(LSMessage::MessageType messageType, uint32_t sequenceNumber, uint8_t ttl, Ipv4Address originatorAddress);
@@ -129,87 +126,36 @@ class LSMessage : public Header
       Ipv4Address destinationAddress;
       std::string pingMessage;
       };
-    //********************* new *********************//
-    struct HelloReq
-      {
-      void Print(std::ostream& os) const;
-      uint32_t GetSerializedSize(void) const;
-      void Serialize(Buffer::Iterator& start) const;
-      uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
-      Ipv4Address destinationAddress;
-      std::string helloMessage;
-      };
-    //********************* new *********************//
-    struct HelloRsp
-      {
-      void Print(std::ostream& os) const;
-      uint32_t GetSerializedSize(void) const;
-      void Serialize(Buffer::Iterator& start) const;
-      uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
-      Ipv4Address destinationAddress;
-      std::string helloMessage;
-      };
-   
-    
-    typedef std::vector<std::pair<uint32_t, uint32_t>> neighborInfo;
-    
-
-    struct LsA
-      {
-      void Print(std::ostream& os) const;
-      uint32_t GetSerializedSize(void) const;
-      void Serialize(Buffer::Iterator& start) const;
-      uint32_t Deserialize(Buffer::Iterator& start);
-      // Payload
-      //Ipv4Address destinationAddress;
-      neighborInfo lsaMessage;
-      };
-
-   
 
   private:
     struct
       {
       PingReq pingReq;
       PingRsp pingRsp;
-      //******************* new ******************//
-      HelloReq helloReq;
-      HelloRsp helloRsp;
-      LsA lsA;
       } m_message;
-    
-
 
   public:
     /**
      *  \returns PingReq Struct
      */
     PingReq GetPingReq();
-    //******************* new ******************//
-    HelloReq GetHelloReq();
-    LsA GetLsA();
+
     /**
      *  \brief Sets PingReq message params
      *  \param message Payload String
      */
 
     void SetPingReq(Ipv4Address destinationAddress, std::string message);
-    void SetHelloReq(Ipv4Address destinationAddress, std::string message); //**** new ****//
-    void SetLsA (neighborInfo lsaMessage);
+
     /**
      * \returns PingRsp Struct
      */
     PingRsp GetPingRsp();
-    //******************* new ******************//
-    HelloRsp GetHelloRsp();
     /**
      *  \brief Sets PingRsp message params
      *  \param message Payload String
      */
     void SetPingRsp(Ipv4Address destinationAddress, std::string message);
-    void SetHelloRsp(Ipv4Address destinationAddress, std::string message); //**** new ****//
   }; // class LSMessage
 
 static inline std::ostream&

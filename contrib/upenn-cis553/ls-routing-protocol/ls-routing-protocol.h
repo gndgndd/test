@@ -91,28 +91,10 @@ public:
   void RecvLSMessage(Ptr<Socket> socket);
   void ProcessPingReq(LSMessage lsMessage);
   void ProcessPingRsp(LSMessage lsMessage);
-  //*******************MS-1*******************//
-  void ProcessHelloReq(LSMessage lsMessage);
-  void ProcessHelloRsp(LSMessage lsMessage, Ipv4Address interfaceAd);
-  void BroadcastHello();
 
   // Periodic Audit
   void AuditPings();
-   //*******************MS-1*******************//
-  void AuditNeighbors();
 
-  //*******************MS-2*******************//
-  void LSAdvertise();
-  void ProcessLsp(LSMessage lsMessage, Ipv4Address interfaceAd );
-  void floodLSA(Ptr<Packet> packet, Ipv4Address fromNode);
-  void Dijkstra();
-
-  struct NeighborInfo
-  {
-  uint32_t neighborNodeNum;
-  //Time t_stamp;
-  uint32_t linkwt;
-  };
   // From Ipv4RoutingProtocol
 
   /**
@@ -251,9 +233,6 @@ protected:
   virtual void DoInitialize(void);
   uint32_t GetNextSequenceNumber();
 
-  typedef std::vector<std::pair<uint32_t, uint32_t>> neighborInfo;
-    
-
   /**
    * \brief Check whether the specified IP is owned by this node.
    *
@@ -269,7 +248,6 @@ private:
   Ptr<Ipv4> m_ipv4;
 
   Time m_pingTimeout;
-  Time m_neighborTimeout;
   uint8_t m_maxTTL;
   uint16_t m_lsPort;
   uint32_t m_currentSequenceNumber;
@@ -278,41 +256,8 @@ private:
 
   // Timers
   Timer m_auditPingsTimer;
-  Timer m_auditNeighborsTimer;
 
   // Ping tracker
   std::map<uint32_t, Ptr<PingRequest>> m_pingTracker;
-
-  struct NeighborTableEntry
-  {
-  //uint32_t nodeNumber;
-  Ipv4Address neighborAddr;
-  Ipv4Address interfaceAddr;
-  Time t_stamp;
-  uint32_t linkwt;
-  };
-  
- struct LSPneighbors{
-  Ipv4Address interfaceAd;
-  uint32_t seqNumber;
-  std::vector <std::pair<uint32_t, uint32_t>> neighbornodeandCost;
-  };
-
-  struct RoutingTableEntry
-  {
-  Ipv4Address destAddr;
-  uint32_t nextHopNum;
-  Ipv4Address nextHopAddr;
-  Ipv4Address interfaceAddr;
-  uint32_t cost;
-  };
-
-  std::map<uint32_t, NeighborTableEntry> m_neighbors;
-
-// originator node, sequence number and neighbor info
-  std::map<uint32_t, LSPneighbors> m_validLSP;
-
-  std::map<uint32_t, RoutingTableEntry> m_routingTable;
-
 };
 #endif
