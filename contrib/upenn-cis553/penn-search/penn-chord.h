@@ -138,9 +138,13 @@ class PennChord : public PennApplication
     // ==============================================================
 
     void Stabilize ();                 // runs ring stabilization logic
-    void Notify (Ipv4Address node);    // updates predecessor if needed
+    void Notify (Ipv4Address node);    // updates predecessor if needed, triggers data transfer
     // Helper for hash-space checks (target in (start, end))
     bool IsBetween (Ipv4Address target, Ipv4Address start, Ipv4Address end); 
+    
+    // MS2 FIX: Data transfer method
+    void TransferKeys(Ipv4Address newOwner, Ipv4Address oldOwner, Ipv4Address predOfNewOwner);
+
 
     // ==============================================================
     // Milestone 2A – Finger Table (for O(log N) routing)
