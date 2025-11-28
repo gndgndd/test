@@ -1,21 +1,4 @@
-﻿/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * Copyright (c) 2010 University of Pennsylvania
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
-
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 #ifndef PENN_SEARCH_H
 #define PENN_SEARCH_H
 
@@ -29,12 +12,6 @@
 #include <set>
 #include <vector>
 #include <string>
-#include <tuple> // Added for std::tuple usage
-#include "ns3/socket.h"
-#include "ns3/nstime.h"
-#include "ns3/timer.h"
-#include "ns3/uinteger.h"
-#include "ns3/boolean.h"
 
 using namespace ns3;
 
@@ -52,37 +29,35 @@ class PennSearch : public PennApplication
     void ProcessPingRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
     void AuditPings ();
     uint32_t GetNextTransactionId ();
-   
+
     // Chord Callbacks
     void HandleChordPingSuccess (Ipv4Address destAddress, std::string message);
     void HandleChordPingFailure (Ipv4Address destAddress, std::string message);
     void HandleChordPingRecv (Ipv4Address destAddress, std::string message);
-
-    // Publish and Lookup Callbacks
-    void ProcessPublishReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
-    void ProcessPublishRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void HandleSearchChordLookup (std::string contextKey, Ipv4Address owner);
+    void HandlePublishChordLookup (std::string keyword, std::string docId, Ipv4Address owner);
     
-    // FIX: Match definitions in .cc
-    void HandleChordLookupSuccess (uint32_t tid, Ipv4Address owner); 
-    void HandleChordLookupFailure (uint32_t tid);
-    void PublishMetadataFile(std::string filepath); // FIX: Signature matches definition
+    // New: Key Transfer Callback
+    void HandleKeyTransfer (Ipv4Address newOwner);
 
-    std::map<uint32_t, std::pair<std::string, std::vector<std::string>>> m_pendingPublishes;
-
-    // Leave/Rejoin/Transfer
-    void HandleLeave(Ipv4Address successorIp); 
-    void HandleRejoin(Ipv4Address successorIp); 
-    void ProcessRejoin(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort); 
-    void TransferKeys(Ipv4Address newOwner, Ipv4Address oldOwner); // FIX: Added declaration
-
-    std::map<uint32_t, std::pair<std::string, std::vector<std::string>>> m_pendingRejoin;
-
-    // Search
-    void ProcessSearchReq(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
-    void ProcessSearchRsp(PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
-
-    // From PennApplication
     virtual void ProcessCommand (std::vector<std::string> tokens);
+
+    // Search Logic
+    void StartSearch (const std::vector<std::string> &terms);
+    void ProcessSearchReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void ProcessSearchRsp (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void ProcessSearchEntry (PennSearchMessage message, Ipv4Address sourceAddress); // Via-node handler
+    void ContinueSearch (const std::string &currentKeyword, const std::string &currentDocs, const std::string &remainingTerms, const std::string &originIp);
+
+    // Publish/Store Logic
+    void ProcessPublishReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+    void ProcessStoreReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort);
+
+    // Helpers
+    std::string SetToString (const std::set<std::string> &s);
+    std::string IntersectDocLists (const std::string &a, const std::string &b);
+    std::string CombineSearchResults (const std::string &existingDocs, const std::string &newDocs);
+
     // From PennLog
     virtual void SetTrafficVerbose (bool on);
     virtual void SetErrorVerbose (bool on);
@@ -91,17 +66,9 @@ class PennSearch : public PennApplication
     virtual void SetChordVerbose (bool on);
     virtual void SetSearchVerbose (bool on);
 
-    // Lookup
-    void Lookup(uint32_t hashToFind); 
-    void HandleLookupResult(Ipv4Address owner, uint32_t transactionId); 
-    void ProcessLookupResult(Ipv4Address owner, uint32_t hashToFind); 
-    
-    // tracker for lookups in flight
-    std::map<uint32_t, uint32_t> m_lookupTracker; //transactionId -> hashToFind
-
   protected:
     virtual void DoDispose ();
-    
+
   private:
     virtual void StartApplication (void);
     virtual void StopApplication (void);
@@ -111,20 +78,9 @@ class PennSearch : public PennApplication
     Ptr<Socket> m_socket;
     Time m_pingTimeout;
     uint16_t m_appPort, m_chordPort;
-    // Timers
     Timer m_auditPingsTimer;
-    // Ping tracker
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
-    // Inverted index <keyword, docIDs>
-    std::map<std::string, std::vector<std::string>> m_invertedIndex; 
-
-    // search tracker: tid → (keywords, currentDocs, requester, current keyword index)
-    std::map<uint32_t, std::tuple<
-      std::vector<std::string>, // keywords
-      std::vector<std::string>, // current docs
-      Ipv4Address,              // requester
-      uint32_t                  // current keyword index
-    >> m_pendingSearches;
+    std::map<std::string, std::set<std::string> > m_invertedList;
 };
 
 #endif
