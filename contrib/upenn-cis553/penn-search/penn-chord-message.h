@@ -36,45 +36,49 @@ class PennChordMessage : public Header
     {
       PING_REQ = 1,
       PING_RSP = 2,
-      // Define extra message types when needed
-      // *** MS2A ADDITIONS (Chord Lookup Messages) ***
+      // *** MS2A LOOKUP MESSAGES ***
       LOOKUP_REQ = 3,       // Lookup request for a key
       LOOKUP_FORWARD = 4,   // Forwards lookup along ring (needed for autograder)
-      LOOKUP_RSP = 5        // Lookup result returning to requester
+      LOOKUP_RSP = 5,       // Lookup result returning to requester
+      // *** MS1/MS2 STABILIZATION & RINGSTATE MESSAGES ***
+      GET_PRED_REQ = 6,     // Ask successor for its predecessor
+      GET_PRED_RSP = 7,     // Return predecessor information
+      NOTIFY_REQ = 8,       // Notify a node that I should be its new predecessor
+      RINGSTATE_REQ = 9     // Initiate / forward ring state output
     };
 
     PennChordMessage (PennChordMessage::MessageType messageType, uint32_t transactionId);
 
     /**
-    *  \brief Sets message type
-    *  \param messageType message type
+    * \brief Sets message type
+    * \param messageType message type
     */
     void SetMessageType (MessageType messageType);
 
     /**
-     *  \returns message type
+     * \returns message type
      */
     MessageType GetMessageType () const;
 
     /**
-     *  \brief Sets Transaction Id
-     *  \param transactionId Transaction Id of the request
+     * \brief Sets Transaction Id
+     * \param transactionId Transaction Id of the request
      */
     void SetTransactionId (uint32_t transactionId);
 
     /**
-     *  \returns Transaction Id
+     * \returns Transaction Id
      */
     uint32_t GetTransactionId () const;
 
   private:
     /**
-     *  \cond
+     * \cond
      */
     MessageType m_messageType;
     uint32_t m_transactionId;
     /**
-     *  \endcond
+     * \endcond
      */
   public:
     static TypeId GetTypeId (void);
@@ -82,6 +86,10 @@ class PennChordMessage : public Header
     void Print (std::ostream &os) const;
     uint32_t GetSerializedSize (void) const;
     void Serialize (Buffer::Iterator start) const;
+    void SerializePredReq (Buffer::Iterator &start) const;
+    uint32_t DeserializePredReq (Buffer::Iterator &start);
+    void SerializePredRsp (Buffer::Iterator &start) const;
+    uint32_t DeserializePredRsp (Buffer::Iterator &start);
     uint32_t Deserialize (Buffer::Iterator start);
 
     struct PingReq
@@ -140,6 +148,38 @@ class PennChordMessage : public Header
           Ipv4Address ownerNode;            // Node that owns the key
         };
 
+      // MS1/MS2 Stabilization & Ringstate Structures
+
+      struct GetPredRsp
+      {
+          void Print(std::ostream &os) const;
+          uint32_t GetSerializedSize() const;
+          void Serialize(Buffer::Iterator &start) const;
+          uint32_t Deserialize(Buffer::Iterator &start);
+
+          Ipv4Address predecessor; // The address of the queried node's predecessor
+      };
+
+      struct NotifyReq
+      {
+          void Print(std::ostream &os) const;
+          uint32_t GetSerializedSize() const;
+          void Serialize(Buffer::Iterator &start) const;
+          uint32_t Deserialize(Buffer::Iterator &start);
+
+          Ipv4Address potentialPredecessor; // The node that should be the predecessor
+      };
+
+      struct RingstateReq
+      {
+          void Print(std::ostream &os) const;
+          uint32_t GetSerializedSize() const;
+          void Serialize(Buffer::Iterator &start) const;
+          uint32_t Deserialize(Buffer::Iterator &start);
+
+          Ipv4Address originator; // The node that started the ringstate dump
+      };
+
   private:
     struct
       {
@@ -149,17 +189,21 @@ class PennChordMessage : public Header
         LookupReq lookupReq;
         LookupForward lookupForward;
         LookupRsp lookupRsp;
+        // *** MS1/MS2 structures ***
+        GetPredRsp getPredRsp;
+        NotifyReq notifyReq;
+        RingstateReq ringstateReq;
       } m_message;
 
   public:
     /**
-     *  \returns PingReq Struct
+     * \returns PingReq Struct
      */
     PingReq GetPingReq ();
 
     /**
-     *  \brief Sets PingReq message params
-     *  \param message Payload String
+     * \brief Sets PingReq message params
+     * \param message Payload String
      */
 
     void SetPingReq (std::string message);
@@ -169,8 +213,8 @@ class PennChordMessage : public Header
      */
     PingRsp GetPingRsp ();
     /**
-     *  \brief Sets PingRsp message params
-     *  \param message Payload String
+     * \brief Sets PingRsp message params
+     * \param message Payload String
      */
     void SetPingRsp (std::string message);
 
@@ -183,6 +227,15 @@ class PennChordMessage : public Header
     LookupRsp GetLookupRsp ();
     void SetLookupRsp (uint32_t key, Ipv4Address owner);
 
+    // MS1/MS2 Stabilization Accessors
+
+    GetPredRsp GetGetPredRsp ();
+    void SetGetPredRsp (Ipv4Address pred);
+    NotifyReq GetNotifyReq ();
+    void SetNotifyReq (Ipv4Address potentialPred);
+    RingstateReq GetRingstateReq ();
+    void SetRingstateReq (Ipv4Address originator);
+
 }; // class PennChordMessage
 
 static inline std::ostream& operator<< (std::ostream& os, const PennChordMessage& message)
@@ -192,4 +245,3 @@ static inline std::ostream& operator<< (std::ostream& os, const PennChordMessage
 }
 
 #endif
-
