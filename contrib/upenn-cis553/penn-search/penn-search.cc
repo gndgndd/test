@@ -16,7 +16,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-
 #include "penn-search.h"
 #include "ns3/grader-logs.h"
 
@@ -57,13 +56,10 @@ PennSearch::PennSearch ()
 
   Ptr<UniformRandomVariable> m_uniformRandomVariable = CreateObject<UniformRandomVariable> ();
   m_currentTransactionId = m_uniformRandomVariable->GetValue (0x00000000, 0xFFFFFFFF);
-
-
 }
 
 PennSearch::~PennSearch ()
 {
-
 }
 
 void
@@ -79,7 +75,6 @@ PennSearch::DoDispose ()
 void
 PennSearch::StartApplication (void)
 {
-  //std::cout << "PennSearch::StartApplication()!!!!!" << std::endl;
   // Create and Configure PennChord
   ObjectFactory factory;
 
@@ -146,12 +141,14 @@ PennSearch::ProcessCommand (std::vector<std::string> tokens)
 {
   std::vector<std::string>::iterator iterator = tokens.begin();
   std::string command = *iterator;
+
   if (command == "CHORD")
     {
       // Send to Chord Sub-Layer
       tokens.erase (iterator);
       m_chord->ProcessCommand (tokens);
     }
+
   if (command == "PING")
     {
       if (tokens.size() < 3)
@@ -183,98 +180,129 @@ PennSearch::ProcessCommand (std::vector<std::string> tokens)
         }
     }
 
- // USER TRIGGERED SEARCH COMMAND
- if (command == "SEARCH")
-   {
-     tokens.erase(tokens.begin());
+  // USER TRIGGERED SEARCH COMMAND
+  if (command == "SEARCH")
+    {
+      // Remove the "SEARCH" token
+      tokens.erase(tokens.begin());
 
-     if (tokens.size() < 1)
-       {
-         ERROR_LOG("SEARCH requires at least one term");
-         return;
-       }
+      if (tokens.size() < 1)
+        {
+          ERROR_LOG("SEARCH requires at least one term");
+          return;
+        }
 
-       // After erasing "SEARCH", the remaining tokens are search terms
+      // At this point tokens are either:
+      //   [term1, term2, ...]
+      // or
+      //   [viaNodeId, term1, term2, ...]
+      // where viaNodeId is a numeric node id (e.g., "4" in
+      // "PENNSEARCH SEARCH 4 Johnny-Depp").
+      if (tokens.size() > 1)
+        {
+          bool allDigits = true;
+          for (size_t i = 0; i < tokens[0].size(); ++i)
+            {
+              char c = tokens[0][i];
+              if (c < '0' || c > '9')
+                {
+                  allDigits = false;
+                  break;
+                }
+            }
+          // If the first remaining token is all digits and there are
+          // more tokens after it, treat it as the via-node id and drop it.
+          if (allDigits)
+            {
+              tokens.erase(tokens.begin());
+            }
+        }
+
+      if (tokens.empty())
+        {
+        ERROR_LOG("SEARCH requires at least one term after via-node id");
+        return;
+        }
+
       std::vector<std::string> terms = tokens;
 
-      SEARCH_LOG (
+      SEARCH_LOG(
         GraderLogs::GetSearchLogStr (terms));
 
       StartSearch (terms);
       return;
     }
 
- // USER TRIGGERED PUBLISH COMMAND
- if (command == "PUBLISH")
-{
-    tokens.erase(tokens.begin());
-
-    // Case 1: metadata file
-    if (tokens.size() == 1)
+  // USER TRIGGERED PUBLISH COMMAND
+  if (command == "PUBLISH")
     {
-        std::string filepath = tokens[0];
-        std::ifstream file(filepath);
+      tokens.erase(tokens.begin());
 
-        if (!file.is_open())
+      // Case 1: metadata file
+      if (tokens.size() == 1)
         {
-            ERROR_LOG("Could not open metadata file: " << filepath);
-            return;
-        }
+          std::string filepath = tokens[0];
+          std::ifstream file(filepath);
 
-        std::string line;
-        while (std::getline(file, line))
-        {
-            std::istringstream iss(line);
-            std::string docId;
-            iss >> docId;
-
-            std::string keyword;
-            while (iss >> keyword)
+          if (!file.is_open())
             {
-                uint32_t hash = PennKeyHelper::CreateShaKey(keyword);
-
-                SEARCH_LOG(
-                    GraderLogs::GetPublishLogStr(keyword, docId)
-                );
-
-                m_chord->StartPublishLookup(keyword, docId, hash);
+              ERROR_LOG("Could not open metadata file: " << filepath);
+              return;
             }
+
+          std::string line;
+          while (std::getline(file, line))
+            {
+              std::istringstream iss(line);
+              std::string docId;
+              iss >> docId;
+
+              std::string keyword;
+              while (iss >> keyword)
+                {
+                  uint32_t hash = PennKeyHelper::CreateShaKey(keyword);
+
+                  SEARCH_LOG(
+                    GraderLogs::GetPublishLogStr(keyword, docId)
+                  );
+
+                  m_chord->StartPublishLookup(keyword, docId, hash);
+                }
+            }
+
+          return;
         }
 
-        return;
-    }
+      // Case 2: PUBLISH <keyword> <docId>
+      if (tokens.size() == 2)
+        {
+          std::string keyword = tokens[0];
+          std::string docId = tokens[1];
 
-    // Case 2: PUBLISH <keyword> <docId>
-    if (tokens.size() == 2)
-    {
-        std::string keyword = tokens[0];
-        std::string docId = tokens[1];
+          uint32_t hash = PennKeyHelper::CreateShaKey(keyword);
 
-        uint32_t hash = PennKeyHelper::CreateShaKey(keyword);
-
-        SEARCH_LOG(
+          SEARCH_LOG(
             GraderLogs::GetPublishLogStr(keyword, docId)
-        );
+          );
 
-        m_chord->StartPublishLookup(keyword, docId, hash);
-        return;
+          m_chord->StartPublishLookup(keyword, docId, hash);
+          return;
+        }
+
+      // Invalid
+      ERROR_LOG("PUBLISH <keyword> <docId> or PUBLISH <metadataFile>");
+      return;
     }
-
-    // Invalid
-    ERROR_LOG("PUBLISH <keyword> <docId> or PUBLISH <metadataFile>");
-    return;
-}
 }
 
 // MS2A START SEARCH (USER INITIATED)
-   /* This function begins the multi keyword workflow.
-      Extracts the first keyword
-      Builds remainingTerms string
-      Creates context string:
-      nextKeyword | currentDocs | remainingTerms | originIp
-      Calls Chord lookup to find owner of first keyword
- */
-
+/* This function begins the multi keyword workflow.
+   Extracts the first keyword
+   Builds remainingTerms string
+   Creates context string:
+   nextKeyword | currentDocs | remainingTerms | originIp
+   Calls Chord lookup to find owner of first keyword
+*/
 void
 PennSearch::StartSearch(const std::vector<std::string> &terms)
 {
@@ -298,9 +326,9 @@ PennSearch::StartSearch(const std::vector<std::string> &terms)
   // Origin of the full search is this node
   std::string originIp;
   {
-      std::ostringstream ss;
-      ss << GetLocalAddress();
-      originIp = ss.str();
+    std::ostringstream ss;
+    ss << GetLocalAddress();
+    originIp = ss.str();
   }
 
   // Context format:
@@ -355,28 +383,28 @@ PennSearch::RecvMessage (Ptr<Socket> socket)
 
   switch (message.GetMessageType ())
     {
-      case PennSearchMessage::PING_REQ:
-        ProcessPingReq (message, sourceAddress, sourcePort);
-        break;
-      case PennSearchMessage::PING_RSP:
-        ProcessPingRsp (message, sourceAddress, sourcePort);
-        break;
-        // MS2 portion
-     case PennSearchMessage::SEARCH_REQ:
-       ProcessSearchReq (message, sourceAddress, sourcePort);
-       break;
-     case PennSearchMessage::SEARCH_RSP:
-       ProcessSearchRsp (message, sourceAddress, sourcePort);
-       break;
-     case PennSearchMessage::PUBLISH_REQ:
-       ProcessPublishReq (message, sourceAddress, sourcePort);
-       break;
-     case PennSearchMessage::STORE_REQ:
-       ProcessStoreReq (message, sourceAddress, sourcePort);
-       break;
-      default:
-        ERROR_LOG ("Unknown Message Type!");
-        break;
+    case PennSearchMessage::PING_REQ:
+      ProcessPingReq (message, sourceAddress, sourcePort);
+      break;
+    case PennSearchMessage::PING_RSP:
+      ProcessPingRsp (message, sourceAddress, sourcePort);
+      break;
+      // MS2 portion
+    case PennSearchMessage::SEARCH_REQ:
+      ProcessSearchReq (message, sourceAddress, sourcePort);
+      break;
+    case PennSearchMessage::SEARCH_RSP:
+      ProcessSearchRsp (message, sourceAddress, sourcePort);
+      break;
+    case PennSearchMessage::PUBLISH_REQ:
+      ProcessPublishReq (message, sourceAddress, sourcePort);
+      break;
+    case PennSearchMessage::STORE_REQ:
+      ProcessStoreReq (message, sourceAddress, sourcePort);
+      break;
+    default:
+      ERROR_LOG ("Unknown Message Type!");
+      break;
     }
 }
 
@@ -396,16 +424,16 @@ PennSearch::ProcessSearchReq(PennSearchMessage message,
     << " origin=" << req.originIp
   );
 
-  /* Lookup local docs for keyword */
+  // Lookup local docs for keyword
   std::string localDocs;
   auto it = m_invertedList.find(req.currentKeyword);
   if (it != m_invertedList.end())
     localDocs = SetToString(it->second);
 
-  /* Merge local docs with incoming doc set */
+  // Merge local docs with incoming doc set
   std::string merged = CombineSearchResults(req.currentDocs, localDocs);
 
-  /* Continue multi keyword workflow */
+  // Continue multi keyword workflow
   ContinueSearch(req.currentKeyword, merged, req.remainingTerms, req.originIp);
 }
 
@@ -446,50 +474,49 @@ PennSearch::ContinueSearch(const std::string &keyword,
   SEARCH_LOG("ContinueSearch docs=" << currentDocs
              << " remaining=" << remainingTerms);
 
-             // Base case: no remaining keywords
-             if (remainingTerms == "")
-               {
-                 // Build and send SEARCH_RSP back to the origin
-                 PennSearchMessage rsp (PennSearchMessage::SEARCH_RSP, GetNextTransactionId ());
-                 rsp.SetSearchRsp (originIp, currentDocs);
+  // Base case: no remaining keywords
+  if (remainingTerms == "")
+    {
+      // Build and send SEARCH_RSP back to the origin
+      PennSearchMessage rsp (PennSearchMessage::SEARCH_RSP, GetNextTransactionId ());
+      rsp.SetSearchRsp (originIp, currentDocs);
 
-                 Ptr<Packet> p = Create<Packet> ();
-                 p->AddHeader (rsp);
+      Ptr<Packet> p = Create<Packet> ();
+      p->AddHeader (rsp);
 
-                 Ipv4Address dest (originIp.c_str ());
-                 m_socket->SendTo (p, 0, InetSocketAddress (dest, m_appPort));
-                 return;
-               }
+      Ipv4Address dest (originIp.c_str ());
+      m_socket->SendTo (p, 0, InetSocketAddress (dest, m_appPort));
+      return;
+    }
 
-             // Extract next keyword
-             std::string nextKeyword;
-             std::string nextRemaining;
+  // Extract next keyword
+  std::string nextKeyword;
+  std::string nextRemaining;
 
-             {
-               std::stringstream ss (remainingTerms);
-               ss >> nextKeyword;
-               std::getline (ss, nextRemaining);
+  {
+    std::stringstream ss (remainingTerms);
+    ss >> nextKeyword;
+    std::getline (ss, nextRemaining);
 
-               if (!nextRemaining.empty () && nextRemaining[0] == ' ')
-                 nextRemaining.erase (0, 1);
-             }
+    if (!nextRemaining.empty () && nextRemaining[0] == ' ')
+      nextRemaining.erase (0, 1);
+  }
 
-             // Prepare Chord lookup context
-             std::string ctx =
-               nextKeyword + "|" +
-               currentDocs + "|" +
-               nextRemaining + "|" +
-               originIp;
+  // Prepare Chord lookup context
+  std::string ctx =
+    nextKeyword + "|" +
+    currentDocs + "|" +
+    nextRemaining + "|" +
+    originIp;
 
-             uint32_t hash = PennKeyHelper::CreateShaKey(nextKeyword);
-             m_chord->StartSearchLookup (ctx, hash);
-           }
+  uint32_t hash = PennKeyHelper::CreateShaKey(nextKeyword);
+  m_chord->StartSearchLookup (ctx, hash);
+}
 
 // MS2 SEARCH CHORD LOOKUP CALLBACK
 void
 PennSearch::HandleSearchChordLookup(std::string ctx, Ipv4Address owner)
 {
-
   std::vector<std::string> parts;
 
   {
@@ -511,31 +538,31 @@ PennSearch::HandleSearchChordLookup(std::string ctx, Ipv4Address owner)
   std::string originIp       = parts[3];
 
   // Convert currentDocs to vector<string> for logging
-std::vector<std::string> docs;
-{
-  std::stringstream ss (currentDocs);
-  std::string tok;
-  while (ss >> tok)
-    {
-      docs.push_back (tok);
-    }
+  std::vector<std::string> docs;
+  {
+    std::stringstream ss (currentDocs);
+    std::string tok;
+    while (ss >> tok)
+      {
+        docs.push_back (tok);
+      }
+  }
+
+  SEARCH_LOG (
+    GraderLogs::GetInvertedListShipLogStr (
+      nextKeyword,
+      docs));
+
+  PennSearchMessage req (PennSearchMessage::SEARCH_REQ, GetNextTransactionId ());
+  req.SetSearchReq (originIp, remainingTerms, currentDocs, nextKeyword);
+
+  Ptr<Packet> p = Create<Packet> ();
+  p->AddHeader (req);
+
+  m_socket->SendTo (p, 0, InetSocketAddress (owner, m_appPort));
 }
 
-SEARCH_LOG (
-  GraderLogs::GetInvertedListShipLogStr (
-    nextKeyword,
-    docs));
-
-PennSearchMessage req (PennSearchMessage::SEARCH_REQ, GetNextTransactionId ());
-req.SetSearchReq (originIp, remainingTerms, currentDocs, nextKeyword);
-
-Ptr<Packet> p = Create<Packet> ();
-p->AddHeader (req);
-
-m_socket->SendTo (p, 0, InetSocketAddress (owner, m_appPort));
-}
-
-//MS2 INVERTED LIST PUBLISH LOGIC
+// MS2 INVERTED LIST PUBLISH LOGIC
 
 void
 PennSearch::ProcessPublishReq (PennSearchMessage message,
@@ -544,7 +571,7 @@ PennSearch::ProcessPublishReq (PennSearchMessage message,
 {
   auto pr = message.GetPublishReq ();
 
-  uint32_t hash = PennKeyHelper::CreateShaKey(pr.keyword);;
+  uint32_t hash = PennKeyHelper::CreateShaKey(pr.keyword);
   m_chord->StartPublishLookup (pr.keyword, pr.docId, hash);
 
   SEARCH_LOG (
@@ -558,7 +585,6 @@ void
 PennSearch::HandlePublishChordLookup(std::string keyword,
                                      std::string docId,
                                      Ipv4Address owner)
-
 {
   if (owner == m_local)
     {
@@ -800,4 +826,3 @@ PennSearch::SetSearchVerbose (bool on)
   m_chord->SetSearchVerbose (on);
   g_searchVerbose = on;
 }
-
