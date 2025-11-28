@@ -1,617 +1,109 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
-
 #include "ns3/penn-search-message.h"
 #include "ns3/log.h"
+#include "ns3/address-utils.h"
 
 using namespace ns3;
-
 NS_LOG_COMPONENT_DEFINE ("PennSearchMessage");
 NS_OBJECT_ENSURE_REGISTERED (PennSearchMessage);
 
-PennSearchMessage::PennSearchMessage ()
-{
+PennSearchMessage::PennSearchMessage () : m_type(0), m_txId(0) {}
+PennSearchMessage::PennSearchMessage (uint8_t t, uint32_t id) : m_type(t), m_txId(id) {}
+PennSearchMessage::~PennSearchMessage () {}
+
+TypeId PennSearchMessage::GetTypeId () { return TypeId ("PennSearchMessage").SetParent<Header>().AddConstructor<PennSearchMessage>(); }
+TypeId PennSearchMessage::GetInstanceTypeId () const { return GetTypeId(); }
+
+void PennSearchMessage::SetMessageType(uint8_t t) { m_type = t; }
+uint8_t PennSearchMessage::GetMessageType() const { return m_type; }
+void PennSearchMessage::SetTransactionId(uint32_t i) { m_txId = i; }
+uint32_t PennSearchMessage::GetTransactionId() const { return m_txId; }
+
+// --- Helpers ---
+void WriteStr(Buffer::Iterator &i, const std::string &s) { i.WriteU16(s.length()); i.Write((const uint8_t*)s.c_str(), s.length()); }
+std::string ReadStr(Buffer::Iterator &i) { uint16_t l=i.ReadU16(); char* b=new char[l]; i.Read((uint8_t*)b,l); std::string s(b,l); delete[] b; return s; }
+
+// Payload Impl
+uint32_t PennSearchMessage::PingData::GetSize() const { return 2+msg.length(); }
+void PennSearchMessage::PingData::Serialize(Buffer::Iterator &i) const { WriteStr(i,msg); }
+uint32_t PennSearchMessage::PingData::Deserialize(Buffer::Iterator &i) { msg=ReadStr(i); return GetSize(); }
+
+uint32_t PennSearchMessage::PublishData::GetSize() const { return 4+k.length()+v.length(); }
+void PennSearchMessage::PublishData::Serialize(Buffer::Iterator &i) const { WriteStr(i,k); WriteStr(i,v); }
+uint32_t PennSearchMessage::PublishData::Deserialize(Buffer::Iterator &i) { k=ReadStr(i); v=ReadStr(i); return GetSize(); }
+
+uint32_t PennSearchMessage::SearchReq::GetSize() const { 
+    uint32_t sz = 8; // IP+Idx
+    sz += 4; for(auto &s : terms) sz += 2+s.length();
+    sz += 4; for(auto &s : docs) sz += 2+s.length();
+    return sz; 
+}
+void PennSearchMessage::SearchReq::Serialize(Buffer::Iterator &i) const {
+    i.WriteHtonU32(src.Get()); i.WriteHtonU32(idx);
+    i.WriteU32(terms.size()); for(auto &s:terms) WriteStr(i,s);
+    i.WriteU32(docs.size()); for(auto &s:docs) WriteStr(i,s);
+}
+uint32_t PennSearchMessage::SearchReq::Deserialize(Buffer::Iterator &i) {
+    src.Set(i.ReadNtohU32()); idx = i.ReadNtohU32();
+    uint32_t c = i.ReadU32(); terms.clear(); while(c--) terms.push_back(ReadStr(i));
+    c = i.ReadU32(); docs.clear(); while(c--) docs.push_back(ReadStr(i));
+    return GetSize();
 }
 
-PennSearchMessage::~PennSearchMessage ()
-{
+uint32_t PennSearchMessage::SearchRsp::GetSize() const {
+    uint32_t sz = 4; for(auto &s : results) sz += 2+s.length(); return sz;
+}
+void PennSearchMessage::SearchRsp::Serialize(Buffer::Iterator &i) const {
+    i.WriteU32(results.size()); for(auto &s:results) WriteStr(i,s);
+}
+uint32_t PennSearchMessage::SearchRsp::Deserialize(Buffer::Iterator &i) {
+    uint32_t c = i.ReadU32(); results.clear(); while(c--) results.push_back(ReadStr(i));
+    return GetSize();
 }
 
-PennSearchMessage::PennSearchMessage (PennSearchMessage::MessageType messageType, uint32_t transactionId)
-{
-  m_messageType = messageType;
-  m_transactionId = transactionId;
-}
-
-TypeId
-PennSearchMessage::GetTypeId (void)
-{
-  static TypeId tid = TypeId ("PennSearchMessage")
-    .SetParent<Header> ()
-    .AddConstructor<PennSearchMessage> ()
-  ;
-  return tid;
-}
-
-TypeId
-PennSearchMessage::GetInstanceTypeId (void) const
-{
-  return GetTypeId ();
-}
-
-
-uint32_t
-PennSearchMessage::GetSerializedSize (void) const
-{
-  // size of messageType, transaction id
-  uint32_t size = sizeof (uint8_t) + sizeof (uint32_t);
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        size += m_message.pingReq.GetSerializedSize ();
-        break;
-      case PING_RSP:
-        size += m_message.pingRsp.GetSerializedSize ();
-        break;
-        // MS2 Message types
-      case SEARCH_REQ:
-        size += m_message.searchReq.GetSerializedSize ();
-        break;
-      case SEARCH_RSP:
-        size += m_message.searchRsp.GetSerializedSize ();
-        break;
-      case PUBLISH_REQ:
-        size += m_message.publishReq.GetSerializedSize ();
-        break;
-      case STORE_REQ:
-        size += m_message.storeReq.GetSerializedSize ();
-        break;
-      default:
-        NS_ASSERT (false);
+// Serialization
+uint32_t PennSearchMessage::GetSerializedSize() const {
+    uint32_t sz = 5;
+    switch(m_type) {
+        case PING_REQ: case PING_RSP: sz += m_ping.GetSize(); break;
+        case PUBLISH_REQ: sz += m_pub.GetSize(); break;
+        case SEARCH_REQ: sz += m_searchReq.GetSize(); break;
+        case SEARCH_RSP: sz += m_searchRsp.GetSize(); break;
     }
-  return size;
+    return sz;
 }
-
-void
-PennSearchMessage::Print (std::ostream &os) const
-{
-  os << "\n****PennSearchMessage Dump****\n" ;
-  os << "messageType: " << m_messageType << "\n";
-  os << "transactionId: " << m_transactionId << "\n";
-  os << "PAYLOAD:: \n";
-
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        m_message.pingReq.Print (os);
-        break;
-      case PING_RSP:
-        m_message.pingRsp.Print (os);
-        break;
-          // MS2 Message types
-      case SEARCH_REQ:
-        m_message.searchReq.Print (os);
-        break;
-      case SEARCH_RSP:
-        m_message.searchRsp.Print (os);
-        break;
-      case PUBLISH_REQ:
-        m_message.publishReq.Print (os);
-        break;
-      case STORE_REQ:
-        m_message.storeReq.Print (os);
-        break;
-      default:
-        break;
-    }
-  os << "\n****END OF MESSAGE****\n";
-}
-
-void
-PennSearchMessage::Serialize (Buffer::Iterator start) const
-{
-  Buffer::Iterator i = start;
-  i.WriteU8 (m_messageType);
-  i.WriteHtonU32 (m_transactionId);
-
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        m_message.pingReq.Serialize (i);
-        break;
-      case PING_RSP:
-        m_message.pingRsp.Serialize (i);
-        break;
-        // MS2 Message types
-      case SEARCH_REQ:
-        m_message.searchReq.Serialize (i);
-        break;
-      case SEARCH_RSP:
-        m_message.searchRsp.Serialize (i);
-        break;
-      case PUBLISH_REQ:
-        m_message.publishReq.Serialize (i);
-        break;
-      case STORE_REQ:
-        m_message.storeReq.Serialize (i);
-        break;
-      default:
-        NS_ASSERT (false);
+void PennSearchMessage::Serialize(Buffer::Iterator start) const {
+    start.WriteU8(m_type); start.WriteHtonU32(m_txId);
+    switch(m_type) {
+        case PING_REQ: case PING_RSP: m_ping.Serialize(start); break;
+        case PUBLISH_REQ: m_pub.Serialize(start); break;
+        case SEARCH_REQ: m_searchReq.Serialize(start); break;
+        case SEARCH_RSP: m_searchRsp.Serialize(start); break;
     }
 }
-
-uint32_t
-PennSearchMessage::Deserialize (Buffer::Iterator start)
-{
-  uint32_t size;
-  Buffer::Iterator i = start;
-  m_messageType = (MessageType) i.ReadU8 ();
-  m_transactionId = i.ReadNtohU32 ();
-
-  size = sizeof (uint8_t) + sizeof (uint32_t);
-
-  switch (m_messageType)
-    {
-      case PING_REQ:
-        size += m_message.pingReq.Deserialize (i);
-        break;
-      case PING_RSP:
-        size += m_message.pingRsp.Deserialize (i);
-        break;
-          // MS2 Message types
-      case SEARCH_REQ:
-        size += m_message.searchReq.Deserialize (i);
-        break;
-      case SEARCH_RSP:
-        size += m_message.searchRsp.Deserialize (i);
-        break;
-      case PUBLISH_REQ:
-        size += m_message.publishReq.Deserialize (i);
-        break;
-      case STORE_REQ:
-        size += m_message.storeReq.Deserialize (i);
-        break;
-      default:
-        NS_ASSERT (false);
+uint32_t PennSearchMessage::Deserialize(Buffer::Iterator start) {
+    m_type = start.ReadU8(); m_txId = start.ReadNtohU32();
+    uint32_t sz = 5;
+    switch(m_type) {
+        case PING_REQ: case PING_RSP: sz += m_ping.Deserialize(start); break;
+        case PUBLISH_REQ: sz += m_pub.Deserialize(start); break;
+        case SEARCH_REQ: sz += m_searchReq.Deserialize(start); break;
+        case SEARCH_RSP: sz += m_searchRsp.Deserialize(start); break;
     }
-  return size;
+    return sz;
 }
+void PennSearchMessage::Print(std::ostream &os) const { os << "Type " << (int)m_type; }
 
-/* ========================================================================
- *                 MS2 SEARCH_REQ
- * ======================================================================== */
-
- uint32_t
- PennSearchMessage::SearchReq::GetSerializedSize(void) const
- {
-     // For each string: 2 byte length + bytes of the string
-     return  sizeof(uint16_t) + originIp.length()
-           + sizeof(uint16_t) + remainingTerms.length()
-           + sizeof(uint16_t) + currentDocs.length()
-           + sizeof(uint16_t) + currentKeyword.length();
- }
-
- void
- PennSearchMessage::SearchReq::Serialize(Buffer::Iterator &start) const
- {
-     start.WriteU16(originIp.length());
-     start.Write((uint8_t*)originIp.c_str(), originIp.length());
-
-     start.WriteU16(remainingTerms.length());
-     start.Write((uint8_t*)remainingTerms.c_str(), remainingTerms.length());
-
-     start.WriteU16(currentDocs.length());
-     start.Write((uint8_t*)currentDocs.c_str(), currentDocs.length());
-
-     start.WriteU16(currentKeyword.length());
-     start.Write((uint8_t*)currentKeyword.c_str(), currentKeyword.length());
- }
-
- uint32_t
- PennSearchMessage::SearchReq::Deserialize(Buffer::Iterator &start)
- {
-     uint16_t len;
-     char* buf;
-
-     len = start.ReadU16();
-     buf = (char*)malloc(len);
-     start.Read((uint8_t*)buf, len);
-     originIp.assign(buf, len);
-     free(buf);
-
-     len = start.ReadU16();
-     buf = (char*)malloc(len);
-     start.Read((uint8_t*)buf, len);
-     remainingTerms.assign(buf, len);
-     free(buf);
-
-     len = start.ReadU16();
-     buf = (char*)malloc(len);
-     start.Read((uint8_t*)buf, len);
-     currentDocs.assign(buf, len);
-     free(buf);
-
-     len = start.ReadU16();
-     buf = (char*)malloc(len);
-     start.Read((uint8_t*)buf, len);
-     currentKeyword.assign(buf, len);
-     free(buf);
-
-     return GetSerializedSize();
- }
-
- void
- PennSearchMessage::SearchReq::Print(std::ostream &os) const
- {
-     os << "SearchReq:: originIp=" << originIp
-        << " remainingTerms="    << remainingTerms
-        << " currentDocs="       << currentDocs
-        << " currentKeyword="    << currentKeyword
-        << "\n";
- }
-
- /* ========================================================================
-  *                 MS2 SEARCH_RSP
-  * ======================================================================== */
-
-  uint32_t
-  PennSearchMessage::SearchRsp::GetSerializedSize(void) const
-  {
-      return  sizeof(uint16_t) + originIp.length()
-            + sizeof(uint16_t) + finalDocs.length();
-  }
-
-  void
-  PennSearchMessage::SearchRsp::Serialize(Buffer::Iterator &start) const
-  {
-      start.WriteU16(originIp.length());
-      start.Write((uint8_t*)originIp.c_str(), originIp.length());
-
-      start.WriteU16(finalDocs.length());
-      start.Write((uint8_t*)finalDocs.c_str(), finalDocs.length());
-  }
-
-  uint32_t
-  PennSearchMessage::SearchRsp::Deserialize(Buffer::Iterator &start)
-  {
-      uint16_t len;
-      char* buf;
-
-      len = start.ReadU16();
-      buf = (char*)malloc(len);
-      start.Read((uint8_t*)buf, len);
-      originIp.assign(buf, len);
-      free(buf);
-
-      len = start.ReadU16();
-      buf = (char*)malloc(len);
-      start.Read((uint8_t*)buf, len);
-      finalDocs.assign(buf, len);
-      free(buf);
-
-      return GetSerializedSize();
-  }
-
-  void
-  PennSearchMessage::SearchRsp::Print(std::ostream &os) const
-  {
-      os << "SearchRsp:: originIp=" << originIp
-         << " finalDocs="           << finalDocs
-         << "\n";
-  }
-
-  /* ========================================================================
-   *                 MS2 PUBLISH_REQ
-   * ======================================================================== */
-
-  uint32_t
-  PennSearchMessage::PublishReq::GetSerializedSize(void) const
-  {
-      return sizeof(uint16_t) + keyword.length() +
-             sizeof(uint16_t) + docId.length();
-  }
-
-  void
-  PennSearchMessage::PublishReq::Serialize(Buffer::Iterator &start) const
-  {
-      start.WriteU16(keyword.length());
-      start.Write((uint8_t*)keyword.c_str(), keyword.length());
-
-      start.WriteU16(docId.length());
-      start.Write((uint8_t*)docId.c_str(), docId.length());
-  }
-
-  uint32_t
-  PennSearchMessage::PublishReq::Deserialize(Buffer::Iterator &start)
-  {
-      uint16_t len;
-      char* buf;
-
-      len = start.ReadU16();
-      buf = (char*)malloc(len);
-      start.Read((uint8_t*)buf, len);
-      keyword.assign(buf, len);
-      free(buf);
-
-      len = start.ReadU16();
-      buf = (char*)malloc(len);
-      start.Read((uint8_t*)buf, len);
-      docId.assign(buf, len);
-      free(buf);
-
-      return GetSerializedSize();
-  }
-
-  void
-  PennSearchMessage::PublishReq::Print(std::ostream &os) const
-  {
-      os << "PublishReq:: keyword=" << keyword
-         << " docId="               << docId
-         << "\n";
-  }
-
-  /* ========================================================================
-   *                 MS2 STORE_REQ
-   * ======================================================================== */
-
-  uint32_t
-  PennSearchMessage::StoreReq::GetSerializedSize(void) const
-  {
-      return sizeof(uint16_t) + keyword.length() +
-             sizeof(uint16_t) + docId.length();
-  }
-
-  void
-  PennSearchMessage::StoreReq::Serialize(Buffer::Iterator &start) const
-  {
-      start.WriteU16(keyword.length());
-      start.Write((uint8_t*)keyword.c_str(), keyword.length());
-
-      start.WriteU16(docId.length());
-      start.Write((uint8_t*)docId.c_str(), docId.length());
-  }
-
-  uint32_t
-  PennSearchMessage::StoreReq::Deserialize(Buffer::Iterator &start)
-  {
-      uint16_t len;
-      char* buf;
-
-      len = start.ReadU16();
-      buf = (char*)malloc(len);
-      start.Read((uint8_t*)buf, len);
-      keyword.assign(buf, len);
-      free(buf);
-
-      len = start.ReadU16();
-      buf = (char*)malloc(len);
-      start.Read((uint8_t*)buf, len);
-      docId.assign(buf, len);
-      free(buf);
-
-      return GetSerializedSize();
-  }
-
-  void
-  PennSearchMessage::StoreReq::Print(std::ostream &os) const
-  {
-      os << "StoreReq:: keyword=" << keyword
-         << " docId="             << docId
-         << "\n";
-  }
-
-
-/* ============================================================================
- *               M S 2    G E T T E R S   A N D   S E T T E R S
- * ============================================================================
- */
-
-PennSearchMessage::SearchReq
-PennSearchMessage::GetSearchReq ()
-{
-  return m_message.searchReq;
+// Wrappers
+void PennSearchMessage::SetPingReq(std::string s) { m_type=PING_REQ; m_ping.msg=s; }
+PennSearchMessage::PingData PennSearchMessage::GetPingReq() { return m_ping; }
+void PennSearchMessage::SetPingRsp(std::string s) { m_type=PING_RSP; m_ping.msg=s; }
+PennSearchMessage::PingData PennSearchMessage::GetPingRsp() { return m_ping; }
+void PennSearchMessage::SetPublishReq(std::string k, std::string v) { m_type=PUBLISH_REQ; m_pub.k=k; m_pub.v=v; }
+PennSearchMessage::PublishData PennSearchMessage::GetPublishReq() { return m_pub; }
+void PennSearchMessage::SetSearchReq(Ipv4Address ip, std::vector<std::string> t, uint32_t i, std::vector<std::string> d) {
+    m_type=SEARCH_REQ; m_searchReq.src=ip; m_searchReq.terms=t; m_searchReq.idx=i; m_searchReq.docs=d;
 }
-
-void
-PennSearchMessage::SetSearchReq(const std::string &originIp,
-                                const std::string &remainingTerms,
-                                const std::string &currentDocs,
-                                const std::string &currentKeyword)
-{
-    m_messageType = SEARCH_REQ;
-    m_message.searchReq.originIp = originIp;
-    m_message.searchReq.remainingTerms = remainingTerms;
-    m_message.searchReq.currentDocs = currentDocs;
-    m_message.searchReq.currentKeyword = currentKeyword;
-}
-
-PennSearchMessage::SearchRsp
-PennSearchMessage::GetSearchRsp ()
-{
-  return m_message.searchRsp;
-}
-
-void
-PennSearchMessage::SetSearchRsp(const std::string &originIp,
-                                const std::string &finalDocs)
-{
-    m_messageType = SEARCH_RSP;
-    m_message.searchRsp.originIp = originIp;
-    m_message.searchRsp.finalDocs = finalDocs;
-}
-
-PennSearchMessage::PublishReq
-PennSearchMessage::GetPublishReq ()
-{
-  return m_message.publishReq;
-}
-
-void
-PennSearchMessage::SetPublishReq(const std::string &keyword,
-                                 const std::string &docId)
-{
-    m_messageType = PUBLISH_REQ;
-    m_message.publishReq.keyword = keyword;
-    m_message.publishReq.docId = docId;
-}
-
-PennSearchMessage::StoreReq
-PennSearchMessage::GetStoreReq ()
-{
-  return m_message.storeReq;
-}
-
-void
-PennSearchMessage::SetStoreReq(const std::string &keyword,
-                               const std::string &docId)
-{
-    m_messageType = STORE_REQ;
-    m_message.storeReq.keyword = keyword;
-    m_message.storeReq.docId = docId;
-}
-
-/* PING_REQ */
-
-uint32_t
-PennSearchMessage::PingReq::GetSerializedSize (void) const
-{
-  uint32_t size;
-  size = sizeof(uint16_t) + pingMessage.length();
-  return size;
-}
-
-void
-PennSearchMessage::PingReq::Print (std::ostream &os) const
-{
-  os << "PingReq:: Message: " << pingMessage << "\n";
-}
-
-void
-PennSearchMessage::PingReq::Serialize (Buffer::Iterator &start) const
-{
-  start.WriteU16 (pingMessage.length ());
-  start.Write ((uint8_t *) (const_cast<char*> (pingMessage.c_str())), pingMessage.length());
-}
-
-uint32_t
-PennSearchMessage::PingReq::Deserialize (Buffer::Iterator &start)
-{
-  uint16_t length = start.ReadU16 ();
-  char* str = (char*) malloc (length);
-  start.Read ((uint8_t*)str, length);
-  pingMessage = std::string (str, length);
-  free (str);
-  return PingReq::GetSerializedSize ();
-}
-
-void
-PennSearchMessage::SetPingReq (std::string pingMessage)
-{
-  if (m_messageType == 0)
-    {
-      m_messageType = PING_REQ;
-    }
-  else
-    {
-      NS_ASSERT (m_messageType == PING_REQ);
-    }
-  m_message.pingReq.pingMessage = pingMessage;
-}
-
-PennSearchMessage::PingReq
-PennSearchMessage::GetPingReq ()
-{
-  return m_message.pingReq;
-}
-
-/* PING_RSP */
-
-uint32_t
-PennSearchMessage::PingRsp::GetSerializedSize (void) const
-{
-  uint32_t size;
-  size = sizeof(uint16_t) + pingMessage.length();
-  return size;
-}
-
-void
-PennSearchMessage::PingRsp::Print (std::ostream &os) const
-{
-  os << "PingReq:: Message: " << pingMessage << "\n";
-}
-
-void
-PennSearchMessage::PingRsp::Serialize (Buffer::Iterator &start) const
-{
-  start.WriteU16 (pingMessage.length ());
-  start.Write ((uint8_t *) (const_cast<char*> (pingMessage.c_str())), pingMessage.length());
-}
-
-uint32_t
-PennSearchMessage::PingRsp::Deserialize (Buffer::Iterator &start)
-{
-  uint16_t length = start.ReadU16 ();
-  char* str = (char*) malloc (length);
-  start.Read ((uint8_t*)str, length);
-  pingMessage = std::string (str, length);
-  free (str);
-  return PingRsp::GetSerializedSize ();
-}
-
-void
-PennSearchMessage::SetPingRsp (std::string pingMessage)
-{
-  if (m_messageType == 0)
-    {
-      m_messageType = PING_RSP;
-    }
-  else
-    {
-      NS_ASSERT (m_messageType == PING_RSP);
-    }
-  m_message.pingRsp.pingMessage = pingMessage;
-}
-
-PennSearchMessage::PingRsp
-PennSearchMessage::GetPingRsp ()
-{
-  return m_message.pingRsp;
-}
-
-void
-PennSearchMessage::SetMessageType (MessageType messageType)
-{
-  m_messageType = messageType;
-}
-
-PennSearchMessage::MessageType
-PennSearchMessage::GetMessageType () const
-{
-  return m_messageType;
-}
-
-void
-PennSearchMessage::SetTransactionId (uint32_t transactionId)
-{
-  m_transactionId = transactionId;
-}
-
-uint32_t
-PennSearchMessage::GetTransactionId (void) const
-{
-  return m_transactionId;
-}
-
+PennSearchMessage::SearchReq PennSearchMessage::GetSearchReq() { return m_searchReq; }
+void PennSearchMessage::SetSearchRsp(std::vector<std::string> r) { m_type=SEARCH_RSP; m_searchRsp.results=r; }
+PennSearchMessage::SearchRsp PennSearchMessage::GetSearchRsp() { return m_searchRsp; }

@@ -4,87 +4,99 @@
 
 #include "ns3/header.h"
 #include "ns3/ipv4-address.h"
-#include <string>
+#include "ns3/packet.h"
+#include "ns3/object.h"
 
 using namespace ns3;
 
 class PennChordMessage : public Header
 {
 public:
-  enum MessageType {
-    PING_REQ = 1,
-    PING_RSP = 2,
-    LOOKUP_REQ = 3,
-    LOOKUP_FORWARD = 4,
-    LOOKUP_RSP = 5,
-    // New types for MS1/MS2 Distributed Logic
-    GET_PREDECESSOR = 6,
-    PREDECESSOR_RSP = 7,
-    NOTIFY = 8,
-    RINGSTATE_REQ = 9
-  };
+    PennChordMessage ();
+    PennChordMessage (uint8_t type, uint32_t txId);
+    virtual ~PennChordMessage ();
 
-  PennChordMessage ();
-  PennChordMessage (MessageType type, uint32_t transactionId);
-  virtual ~PennChordMessage ();
+    enum MessageType {
+        PING_REQ = 1,
+        PING_RSP = 2,
+        FIND_SUCCESSOR_REQ = 3,
+        FIND_SUCCESSOR_RSP = 4,
+        NOTIFY_REQ = 5,
+        GET_PREDECESSOR_REQ = 6,
+        GET_PREDECESSOR_RSP = 7,
+        RING_STATE = 8
+    };
 
-  static TypeId GetTypeId (void);
-  virtual TypeId GetInstanceTypeId (void) const;
-  virtual void Print (std::ostream &os) const;
-  virtual void Serialize (Buffer::Iterator start) const;
-  virtual uint32_t Deserialize (Buffer::Iterator start);
-  virtual uint32_t GetSerializedSize (void) const;
+    void SetMessageType (uint8_t type);
+    uint8_t GetMessageType () const;
+    void SetTransactionId (uint32_t txId);
+    uint32_t GetTransactionId () const;
 
-  MessageType GetMessageType () const;
-  uint32_t GetTransactionId () const;
+    static TypeId GetTypeId (void);
+    virtual TypeId GetInstanceTypeId (void) const;
+    void Print (std::ostream &os) const;
+    uint32_t GetSerializedSize (void) const;
+    void Serialize (Buffer::Iterator start) const;
+    uint32_t Deserialize (Buffer::Iterator start);
 
-  // Structs for payloads
-  struct PingReq { std::string pingMessage; };
-  struct PingRsp { std::string pingMessage; };
-  struct LookupReq { uint32_t lookupKey; Ipv4Address originator; Ipv4Address lastHop; };
-  struct LookupForward { uint32_t lookupKey; Ipv4Address originator; Ipv4Address lastHop; };
-  struct LookupRsp { uint32_t lookupKey; Ipv4Address ownerNode; };
-  
-  // Stabilization payloads
-  struct PredecessorRsp { Ipv4Address predecessorNode; };
-  struct NotifyReq { Ipv4Address potentialPredecessor; };
-  
-  // Ringstate payload
-  struct RingStateReq { Ipv4Address originNode; };
+    // --- Message Data Structures ---
+    struct PingData {
+        std::string msg;
+        uint32_t GetSize() const;
+        void Serialize(Buffer::Iterator &i) const;
+        uint32_t Deserialize(Buffer::Iterator &i);
+    };
 
-  // Setters
-  void SetPingReq (std::string msg);
-  void SetPingRsp (std::string msg);
-  void SetLookupReq (uint32_t key, Ipv4Address origin, Ipv4Address hop);
-  void SetLookupForward (uint32_t key, Ipv4Address origin, Ipv4Address hop);
-  void SetLookupRsp (uint32_t key, Ipv4Address owner);
-  void SetPredecessorRsp (Ipv4Address pred);
-  void SetNotify (Ipv4Address potPred);
-  void SetRingStateReq (Ipv4Address origin);
+    struct FindSuccReq {
+        uint32_t key;
+        bool isApp;
+        uint32_t GetSize() const;
+        void Serialize(Buffer::Iterator &i) const;
+        uint32_t Deserialize(Buffer::Iterator &i);
+    };
 
-  // Getters
-  PingReq GetPingReq () const;
-  PingRsp GetPingRsp () const;
-  LookupReq GetLookupReq () const;
-  LookupForward GetLookupForward () const;
-  LookupRsp GetLookupRsp () const;
-  PredecessorRsp GetPredecessorRsp () const;
-  NotifyReq GetNotify () const;
-  RingStateReq GetRingStateReq () const;
+    struct FindSuccRsp {
+        Ipv4Address addr;
+        bool isApp;
+        uint32_t GetSize() const;
+        void Serialize(Buffer::Iterator &i) const;
+        uint32_t Deserialize(Buffer::Iterator &i);
+    };
+
+    struct AddressPayload {
+        Ipv4Address addr;
+        uint32_t GetSize() const;
+        void Serialize(Buffer::Iterator &i) const;
+        uint32_t Deserialize(Buffer::Iterator &i);
+    };
+
+    // Accessors
+    void SetPingReq(std::string s);
+    void SetPingRsp(std::string s);
+    
+    // Fixed: Accessors return the struct to match usage .GetPingReq().msg
+    PingData GetPingReq();
+    PingData GetPingRsp();
+
+    void SetFindSuccReq(uint32_t key, bool isApp);
+    FindSuccReq GetFindSuccReq();
+
+    void SetFindSuccRsp(Ipv4Address addr, bool isApp);
+    FindSuccRsp GetFindSuccRsp();
+
+    void SetNotifyReq(Ipv4Address addr);
+    AddressPayload GetNotifyReq();
+
+    void SetGetPredRsp(Ipv4Address addr);
+    AddressPayload GetGetPredRsp();
 
 private:
-  MessageType m_type;
-  uint32_t m_transactionId;
+    uint8_t m_type;
+    uint32_t m_txId;
 
-  // Payload storage
-  PingReq m_pingReq;
-  PingRsp m_pingRsp;
-  LookupReq m_lookupReq;
-  LookupForward m_lookupFwd;
-  LookupRsp m_lookupRsp;
-  PredecessorRsp m_predRsp;
-  NotifyReq m_notify;
-  RingStateReq m_ringState;
+    PingData m_ping;
+    FindSuccReq m_findSuccReq;
+    FindSuccRsp m_findSuccRsp;
+    AddressPayload m_addrPayload; 
 };
-
 #endif
