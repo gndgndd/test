@@ -150,10 +150,18 @@ void PennChordMessage::LookupRsp::Print (std::ostream &os) const { os << "Lookup
 void PennChordMessage::LookupRsp::Serialize (Buffer::Iterator &i) const { i.WriteHtonU32 (lookupKey); i.WriteHtonU32 (ownerNode.Get ()); }
 uint32_t PennChordMessage::LookupRsp::Deserialize (Buffer::Iterator &i) { lookupKey = i.ReadNtohU32 (); ownerNode = Ipv4Address(i.ReadNtohU32 ()); return GetSerializedSize (); }
 
-uint32_t PennChordMessage::RingstateMsg::GetSerializedSize () const { return IPV4_ADDRESS_SIZE; }
+// FIX: Updated RingstateMsg Serialization
+uint32_t PennChordMessage::RingstateMsg::GetSerializedSize () const { return IPV4_ADDRESS_SIZE + sizeof(uint16_t); }
 void PennChordMessage::RingstateMsg::Print (std::ostream &os) const { os << "Ringstate\n"; }
-void PennChordMessage::RingstateMsg::Serialize (Buffer::Iterator &i) const { i.WriteHtonU32 (initiatorNode.Get ()); }
-uint32_t PennChordMessage::RingstateMsg::Deserialize (Buffer::Iterator &i) { initiatorNode = Ipv4Address(i.ReadNtohU32 ()); return GetSerializedSize (); }
+void PennChordMessage::RingstateMsg::Serialize (Buffer::Iterator &i) const { 
+    i.WriteHtonU32 (initiatorNode.Get ()); 
+    i.WriteHtonU16(hopCount);
+}
+uint32_t PennChordMessage::RingstateMsg::Deserialize (Buffer::Iterator &i) { 
+    initiatorNode = Ipv4Address(i.ReadNtohU32 ()); 
+    hopCount = i.ReadNtohU16();
+    return GetSerializedSize (); 
+}
 
 uint32_t PennChordMessage::StabilizeReq::GetSerializedSize () const { return IPV4_ADDRESS_SIZE; }
 void PennChordMessage::StabilizeReq::Print (std::ostream &os) const { os << "StabilizeReq\n"; }
@@ -170,7 +178,6 @@ void PennChordMessage::NotifyMsg::Print (std::ostream &os) const { os << "Notify
 void PennChordMessage::NotifyMsg::Serialize (Buffer::Iterator &i) const { i.WriteHtonU32 (potentialPredessor.Get ()); }
 uint32_t PennChordMessage::NotifyMsg::Deserialize (Buffer::Iterator &i) { potentialPredessor = Ipv4Address(i.ReadNtohU32 ()); return GetSerializedSize (); }
 
-// NEW: SetSuccReq Implementation
 uint32_t PennChordMessage::SetSuccReq::GetSerializedSize () const { return IPV4_ADDRESS_SIZE; }
 void PennChordMessage::SetSuccReq::Print (std::ostream &os) const { os << "SetSuccReq\n"; }
 void PennChordMessage::SetSuccReq::Serialize (Buffer::Iterator &i) const { i.WriteHtonU32 (newSuccessor.Get ()); }
@@ -188,8 +195,15 @@ PennChordMessage::LookupForward PennChordMessage::GetLookupForward () { return m
 void PennChordMessage::SetLookupForward (uint32_t key, Ipv4Address origin, Ipv4Address lastHop) { m_messageType = LOOKUP_FORWARD; m_message.lookupForward.lookupKey = key; m_message.lookupForward.originator = origin; m_message.lookupForward.lastHop = lastHop; }
 PennChordMessage::LookupRsp PennChordMessage::GetLookupRsp () { return m_message.lookupRsp; }
 void PennChordMessage::SetLookupRsp (uint32_t key, Ipv4Address owner) { m_messageType = LOOKUP_RSP; m_message.lookupRsp.lookupKey = key; m_message.lookupRsp.ownerNode = owner; }
+
+// FIX: Updated Ringstate Setter/Getter
 PennChordMessage::RingstateMsg PennChordMessage::GetRingstateMsg () { return m_message.ringstateMsg; }
-void PennChordMessage::SetRingstateMsg (Ipv4Address initiator) { m_messageType = RINGSTATE_MSG; m_message.ringstateMsg.initiatorNode = initiator; }
+void PennChordMessage::SetRingstateMsg (Ipv4Address initiator, uint16_t hops) { 
+    m_messageType = RINGSTATE_MSG; 
+    m_message.ringstateMsg.initiatorNode = initiator; 
+    m_message.ringstateMsg.hopCount = hops;
+}
+
 PennChordMessage::StabilizeReq PennChordMessage::GetStabilizeReq () { return m_message.stabilizeReq; }
 void PennChordMessage::SetStabilizeReq (Ipv4Address requestor) { m_messageType = STABILIZE_REQ; m_message.stabilizeReq.requestingNode = requestor; }
 PennChordMessage::StabilizeRsp PennChordMessage::GetStabilizeRsp () { return m_message.stabilizeRsp; }
@@ -197,7 +211,6 @@ void PennChordMessage::SetStabilizeRsp (Ipv4Address pred) { m_messageType = STAB
 PennChordMessage::NotifyMsg PennChordMessage::GetNotifyMsg () { return m_message.notifyMsg; }
 void PennChordMessage::SetNotifyMsg (Ipv4Address potPred) { m_messageType = NOTIFY_MSG; m_message.notifyMsg.potentialPredessor = potPred; }
 
-// NEW Accessors
 PennChordMessage::SetSuccReq PennChordMessage::GetSetSuccReq() { return m_message.setSuccReq; }
 void PennChordMessage::SetSetSuccReq(Ipv4Address newSucc) { m_messageType = SET_SUCC_REQ; m_message.setSuccReq.newSuccessor = newSucc; }
 
