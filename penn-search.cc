@@ -189,42 +189,15 @@ PennSearch::ProcessCommand (std::vector<std::string> tokens)
       // Remove "SEARCH"
       tokens.erase (tokens.begin ());
 
-      if (tokens.size () < 1)
+      if (tokens.size () < 2)
         {
-          ERROR_LOG ("SEARCH requires at least one term");
+          ERROR_LOG ("SEARCH requires a via-node id and at least one term");
           return;
         }
 
-      // tokens now either:
-      //  [term1, term2, ...]
-      // or
-      //  [viaNodeId, term1, term2, ...]
-      //
-      // For this project, a "via" node is *actually used*:
-      // - the originating node (possibly non-Chord) logs the search
-      //   and sends a SEARCH_REQ to the via node
-      // - the via node then starts the actual multi-keyword search
-      //   on behalf of the origin.
-      std::string viaNodeId;
-
-      if (tokens.size () > 1)
-        {
-          bool allDigits = true;
-          for (size_t i = 0; i < tokens[0].size (); ++i)
-            {
-              char c = tokens[0][i];
-              if (c < '0' || c > '9')
-                {
-                  allDigits = false;
-                  break;
-                }
-            }
-          if (allDigits)
-            {
-              viaNodeId = tokens[0];
-              tokens.erase (tokens.begin ());
-            }
-        }
+      // First token is *always* the via-node id
+      std::string viaNodeId = tokens[0];
+      tokens.erase (tokens.begin ()); // remove viaNodeId
 
       if (tokens.empty ())
         {
@@ -232,55 +205,73 @@ PennSearch::ProcessCommand (std::vector<std::string> tokens)
           return;
         }
 
+      // Remaining tokens are the search terms
       std::vector<std::string> terms = tokens;
 
       // This is the log the autograder checks for "search message"
       SEARCH_LOG (GraderLogs::GetSearchLogStr (terms));
 
-      // If no viaNodeId was provided, or if viaNodeId refers to *this* node,
-      // we just start the search locally (as before).
-      if (viaNodeId.empty () || viaNodeId == GetNodeId ())
+      // Resolve via-node IP address
+      Ipv4Address viaNodeAddr = ResolveNodeIpAddress (viaNodeId);
+      Ipv4Address myAddr      = GetLocalAddress ();
+
+      // If the via-node is *this* node, we can just run the
+      // existing Chord-driven search pipeline locally.
+      if (viaNodeAddr == myAddr)
         {
           StartSearch (terms);
           return;
         }
 
-      // There is a via node, and it's a *different* node.
-      // We treat this node as a "client" that asks the via node
-      // to perform the search on its behalf.
-      Ipv4Address viaAddr = ResolveNodeIpAddress (viaNodeId);
-      if (viaAddr == Ipv4Address::GetAny ())
-        {
-          ERROR_LOG ("Unknown via node id: " << viaNodeId << ". Falling back to local search.");
-          StartSearch (terms);
-          return;
-        }
+      // Otherwise, we are an external node that must send the
+      // search to the via-node so that *it* performs the Chord
+      // lookups on our behalf.
+      //
+      // We encode a special "init" SEARCH_REQ by putting
+      // currentDocs="__INIT__" and stuffing all terms (including
+      // the first) into remainingTerms. The via-node will detect
+      // this marker and call StartSearch() with the right origin.
 
-      // Logical origin of the query is this node's IP
-      std::ostringstream oss;
-      oss << GetLocalAddress ();
-      std::string originIp = oss.str ();
+      std::ostringstream originStream;
+      originStream << myAddr;
+      std::string originIp = originStream.str ();
 
-      // Pack all terms into remainingTerms; currentDocs and currentKeyword
-      // are left empty to signal "client->via initial request".
-      std::string termString;
+      // Encode all terms in a single space-separated string
+      std::ostringstream termsStream;
       for (size_t i = 0; i < terms.size (); ++i)
         {
-          if (!termString.empty ()) termString += " ";
-          termString += terms[i];
+          if (i > 0)
+            {
+              termsStream << " ";
+            }
+          termsStream << terms[i];
         }
+      std::string allTerms = termsStream.str ();
 
-      PennSearchMessage req (PennSearchMessage::SEARCH_REQ, GetNextTransactionId ());
-      req.SetSearchReq (originIp,
-                        termString,   // remainingTerms holds the full term list
-                        "",           // currentDocs empty
-                        "");          // currentKeyword empty => special case in ProcessSearchReq
+      // We still need to fill currentKeyword for the message, but
+      // it will be ignored by the via-node in the "__INIT__" case.
+      std::string dummyKeyword = (terms.empty () ? "" : terms[0]);
+
+      uint32_t transactionId = GetNextTransactionId ();
+      PennSearchMessage initReq (PennSearchMessage::SEARCH_REQ, transactionId);
+
+      // Convention:
+      //   originIp      = true origin (this node)
+      //   remainingTerms = all search terms
+      //   currentDocs    = "__INIT__" (special marker)
+      //   currentKeyword = dummy / unused
+      initReq.SetSearchReq (originIp,
+                            allTerms,
+                            std::string ("__INIT__"),
+                            dummyKeyword);
 
       Ptr<Packet> p = Create<Packet> ();
-      p->AddHeader (req);
-      m_socket->SendTo (p, 0, InetSocketAddress (viaAddr, m_appPort));
+      p->AddHeader (initReq);
+      m_socket->SendTo (p, 0, InetSocketAddress (viaNodeAddr, m_appPort));
+
       return;
     }
+
 
   // USER TRIGGERED PUBLISH COMMAND
   if (command == "PUBLISH")
@@ -479,12 +470,22 @@ PennSearch::ProcessSearchReq (PennSearchMessage message,
 {
   auto req = message.GetSearchReq ();
 
-  // Special case: client -> via-node initial request.
-  // We signal this by sending SEARCH_REQ with currentKeyword == "".
-  // In that case, remainingTerms holds the *full* list of search terms,
-  // and originIp is the logical origin of the search.
-  if (req.currentKeyword.empty ())
+  SEARCH_LOG ("SEARCH_REQ keyword=" << req.currentKeyword
+             << " remaining=" << req.remainingTerms
+             << " currentDocs=" << req.currentDocs
+             << " origin=" << req.originIp);
+
+  // ------------------------------------------------------------
+  // SPECIAL CASE: External origin node asking this via-node to
+  // *start* the search (non-Chord node issue search).
+  //
+  // We detect this by currentDocs == "__INIT__" as set in
+  // ProcessCommand() on the origin node.
+  // ------------------------------------------------------------
+  if (req.currentDocs == "__INIT__")
     {
+      // req.remainingTerms contains the full list of terms
+      // (space-separated). Parse into a vector<string>.
       std::vector<std::string> terms;
       {
         std::stringstream ss (req.remainingTerms);
@@ -497,19 +498,47 @@ PennSearch::ProcessSearchReq (PennSearchMessage message,
 
       if (terms.empty ())
         {
-          ERROR_LOG ("SEARCH_REQ with empty term list at via node");
-          return;
+        ERROR_LOG ("Init SEARCH_REQ with no terms");
+        return;
         }
 
-      // Start the full multi-keyword search on behalf of originIp
-      StartSearchFromOrigin (terms, req.originIp);
+      // We replicate StartSearch() logic here but with explicit originIp.
+      std::string originIp = req.originIp;
+
+      // First keyword and remaining terms
+      std::string firstKeyword = terms[0];
+      std::string remainingTerms;
+      if (terms.size () > 1)
+        {
+          std::ostringstream oss;
+          for (size_t i = 1; i < terms.size (); ++i)
+            {
+              if (i > 1)
+                {
+                  oss << " ";
+                }
+              oss << terms[i];
+            }
+          remainingTerms = oss.str ();
+        }
+
+      // Encode context for the first Chord lookup:
+      //   nextKeyword | currentDocs | remainingTerms | originIp
+      std::string ctx =
+        firstKeyword + "|" +
+        std::string("") + "|" +
+        remainingTerms + "|" +
+        originIp;
+
+      uint32_t hash = PennKeyHelper::CreateShaKey (firstKeyword);
+      m_chord->StartSearchLookup (ctx, hash);
       return;
     }
 
-  SEARCH_LOG ("SEARCH_REQ keyword=" << req.currentKeyword
-             << " remaining=" << req.remainingTerms
-             << " currentDocs=" << req.currentDocs
-             << " origin=" << req.originIp);
+  // ------------------------------------------------------------
+  // NORMAL CASE: This node is the owner for req.currentKeyword,
+  // and we are participating in the distributed intersection.
+  // ------------------------------------------------------------
 
   // 1) Lookup local docs for this keyword
   std::string localDocs;
@@ -542,6 +571,7 @@ PennSearch::ProcessSearchReq (PennSearchMessage message,
                   req.remainingTerms,
                   req.originIp);
 }
+
 
 void
 PennSearch::ProcessSearchRsp (PennSearchMessage message,
