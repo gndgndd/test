@@ -30,8 +30,7 @@ PennChordMessage::~PennChordMessage ()
 {
 }
 
-PennChordMessage::PennChordMessage (PennChordMessage::MessageType messageType,
-                                    uint32_t transactionId)
+PennChordMessage::PennChordMessage (PennChordMessage::MessageType messageType, uint32_t transactionId)
 {
   m_messageType = messageType;
   m_transactionId = transactionId;
@@ -53,6 +52,7 @@ PennChordMessage::GetInstanceTypeId (void) const
   return GetTypeId ();
 }
 
+
 uint32_t
 PennChordMessage::GetSerializedSize (void) const
 {
@@ -66,7 +66,7 @@ PennChordMessage::GetSerializedSize (void) const
       case PING_RSP:
         size += m_message.pingRsp.GetSerializedSize ();
         break;
-      // MS2A Added Lookup Messages
+      // MS2A LOOKUP SERIALIZATION
       case LOOKUP_REQ:
         size += m_message.lookupReq.GetSerializedSize ();
         break;
@@ -76,18 +76,18 @@ PennChordMessage::GetSerializedSize (void) const
       case LOOKUP_RSP:
         size += m_message.lookupRsp.GetSerializedSize ();
         break;
-      // MS2B – ring maintenance
       case RINGSTATE_MSG:
-        size += m_message.ringState.GetSerializedSize ();
+        size += m_message.ringstateMsg.GetSerializedSize ();
         break;
-      case STABILIZE_REQ:
-        size += m_message.stabilizeReq.GetSerializedSize ();
+      // MS2B STABILIZATION SERIALIZATION
+      case GET_PREDECESSOR_REQ:
+        // No payload
         break;
-      case STABILIZE_RSP:
-        size += m_message.stabilizeRsp.GetSerializedSize ();
+      case GET_PREDECESSOR_RSP:
+        size += m_message.getPredecessorRsp.GetSerializedSize();
         break;
       case NOTIFY_MSG:
-        size += m_message.notify.GetSerializedSize ();
+        size += m_message.notifyMsg.GetSerializedSize();
         break;
       default:
         NS_ASSERT (false);
@@ -111,7 +111,7 @@ PennChordMessage::Print (std::ostream &os) const
       case PING_RSP:
         m_message.pingRsp.Print (os);
         break;
-      // MS2A LOOKUP MESSAGES
+      //MS2A LOOKUP MESSAGES
       case LOOKUP_REQ:
         m_message.lookupReq.Print (os);
         break;
@@ -121,18 +121,18 @@ PennChordMessage::Print (std::ostream &os) const
       case LOOKUP_RSP:
         m_message.lookupRsp.Print (os);
         break;
-      // MS2B RING MAINTENANCE
       case RINGSTATE_MSG:
-        m_message.ringState.Print (os);
+        m_message.ringstateMsg.Print (os);
         break;
-      case STABILIZE_REQ:
-        m_message.stabilizeReq.Print (os);
+      // MS2B STABILIZATION MESSAGES
+      case GET_PREDECESSOR_REQ:
+        os << "GET_PREDECESSOR_REQ (No Payload)\n";
         break;
-      case STABILIZE_RSP:
-        m_message.stabilizeRsp.Print (os);
+      case GET_PREDECESSOR_RSP:
+        m_message.getPredecessorRsp.Print(os);
         break;
       case NOTIFY_MSG:
-        m_message.notify.Print (os);
+        m_message.notifyMsg.Print(os);
         break;
       default:
         break;
@@ -165,18 +165,17 @@ PennChordMessage::Serialize (Buffer::Iterator start) const
       case LOOKUP_RSP:
         m_message.lookupRsp.Serialize (i);
         break;
-      // MS2B RING MAINTENANCE
       case RINGSTATE_MSG:
-        m_message.ringState.Serialize (i);
+        m_message.ringstateMsg.Serialize (i);
+        break;  
+      // MS2B STABILIZATION SERIALIZATION
+      case GET_PREDECESSOR_REQ:
         break;
-      case STABILIZE_REQ:
-        m_message.stabilizeReq.Serialize (i);
-        break;
-      case STABILIZE_RSP:
-        m_message.stabilizeRsp.Serialize (i);
+      case GET_PREDECESSOR_RSP:
+        m_message.getPredecessorRsp.Serialize(i);
         break;
       case NOTIFY_MSG:
-        m_message.notify.Serialize (i);
+        m_message.notifyMsg.Serialize(i);
         break;
       default:
         NS_ASSERT (false);
@@ -211,18 +210,17 @@ PennChordMessage::Deserialize (Buffer::Iterator start)
       case LOOKUP_RSP:
         size += m_message.lookupRsp.Deserialize (i);
         break;
-      // MS2B RING MAINTENANCE
       case RINGSTATE_MSG:
-        size += m_message.ringState.Deserialize (i);
+        size += m_message.ringstateMsg.Deserialize (i);
         break;
-      case STABILIZE_REQ:
-        size += m_message.stabilizeReq.Deserialize (i);
+      // MS2B STABILIZATION DESERIALIZATION
+      case GET_PREDECESSOR_REQ:
         break;
-      case STABILIZE_RSP:
-        size += m_message.stabilizeRsp.Deserialize (i);
+      case GET_PREDECESSOR_RSP:
+        size += m_message.getPredecessorRsp.Deserialize(i);
         break;
       case NOTIFY_MSG:
-        size += m_message.notify.Deserialize (i);
+        size += m_message.notifyMsg.Deserialize(i);
         break;
       default:
         NS_ASSERT (false);
@@ -338,7 +336,7 @@ PennChordMessage::GetPingRsp ()
   return m_message.pingRsp;
 }
 
-// MS2A LOOKUP MESSAGES
+//MS2A LOOKUP MESSAGES
 
 uint32_t
 PennChordMessage::LookupReq::GetSerializedSize () const
@@ -430,6 +428,32 @@ PennChordMessage::LookupRsp::Deserialize (Buffer::Iterator &i)
   return GetSerializedSize ();
 }
 
+uint32_t
+PennChordMessage::RingstateMsg::GetSerializedSize () const
+{
+  return IPV4_ADDRESS_SIZE;
+}
+
+void
+PennChordMessage::RingstateMsg::Print (std::ostream &os) const
+{
+  os << "RingstateMsg:: Initiator=" << initiatorNode << "\n";
+}
+
+void
+PennChordMessage::RingstateMsg::Serialize (Buffer::Iterator &i) const
+{
+  i.WriteHtonU32 (initiatorNode.Get ());
+}
+
+uint32_t
+PennChordMessage::RingstateMsg::Deserialize (Buffer::Iterator &i)
+{
+  initiatorNode = Ipv4Address(i.ReadNtohU32 ());
+  return GetSerializedSize ();
+}
+
+
 // Accessors
 
 PennChordMessage::LookupReq
@@ -476,165 +500,17 @@ PennChordMessage::SetLookupRsp (uint32_t key, Ipv4Address owner)
   m_message.lookupRsp.ownerNode = owner;
 }
 
-// MS2B – Ringstate payload
-
-uint32_t
-PennChordMessage::RingState::GetSerializedSize () const
+PennChordMessage::RingstateMsg
+PennChordMessage::getRingstateMsg ()
 {
-  return IPV4_ADDRESS_SIZE;
+  return m_message.ringstateMsg;
 }
 
 void
-PennChordMessage::RingState::Print (std::ostream &os) const
-{
-  os << "RingState:: initiator=" << initiator << "\n";
-}
-
-void
-PennChordMessage::RingState::Serialize (Buffer::Iterator &i) const
-{
-  i.WriteHtonU32 (initiator.Get ());
-}
-
-uint32_t
-PennChordMessage::RingState::Deserialize (Buffer::Iterator &i)
-{
-  initiator = Ipv4Address (i.ReadNtohU32 ());
-  return GetSerializedSize ();
-}
-
-// MS2B – StabilizeReq (no payload)
-
-uint32_t
-PennChordMessage::StabilizeReq::GetSerializedSize () const
-{
-  return 0;
-}
-
-void
-PennChordMessage::StabilizeReq::Print (std::ostream &os) const
-{
-  os << "StabilizeReq\n";
-}
-
-void
-PennChordMessage::StabilizeReq::Serialize (Buffer::Iterator &i) const
-{
-  // no payload
-}
-
-uint32_t
-PennChordMessage::StabilizeReq::Deserialize (Buffer::Iterator &i)
-{
-  // no payload
-  return 0;
-}
-
-// MS2B – StabilizeRsp
-
-uint32_t
-PennChordMessage::StabilizeRsp::GetSerializedSize () const
-{
-  return IPV4_ADDRESS_SIZE;
-}
-
-void
-PennChordMessage::StabilizeRsp::Print (std::ostream &os) const
-{
-  os << "StabilizeRsp:: predecessor=" << predecessor << "\n";
-}
-
-void
-PennChordMessage::StabilizeRsp::Serialize (Buffer::Iterator &i) const
-{
-  i.WriteHtonU32 (predecessor.Get ());
-}
-
-uint32_t
-PennChordMessage::StabilizeRsp::Deserialize (Buffer::Iterator &i)
-{
-  predecessor = Ipv4Address (i.ReadNtohU32 ());
-  return GetSerializedSize ();
-}
-
-// MS2B – Notify
-
-uint32_t
-PennChordMessage::Notify::GetSerializedSize () const
-{
-  return IPV4_ADDRESS_SIZE;
-}
-
-void
-PennChordMessage::Notify::Print (std::ostream &os) const
-{
-  os << "Notify:: potentialPred=" << potentialPred << "\n";
-}
-
-void
-PennChordMessage::Notify::Serialize (Buffer::Iterator &i) const
-{
-  i.WriteHtonU32 (potentialPred.Get ());
-}
-
-uint32_t
-PennChordMessage::Notify::Deserialize (Buffer::Iterator &i)
-{
-  potentialPred = Ipv4Address (i.ReadNtohU32 ());
-  return GetSerializedSize ();
-}
-
-// MS2B accessors
-
-PennChordMessage::RingState
-PennChordMessage::GetRingState ()
-{
-  return m_message.ringState;
-}
-
-void
-PennChordMessage::SetRingState (Ipv4Address initiator)
+PennChordMessage::setRingstateMsg (Ipv4Address initiator)
 {
   m_messageType = RINGSTATE_MSG;
-  m_message.ringState.initiator = initiator;
-}
-
-PennChordMessage::StabilizeReq
-PennChordMessage::GetStabilizeReq ()
-{
-  return m_message.stabilizeReq;
-}
-
-void
-PennChordMessage::SetStabilizeReq ()
-{
-  m_messageType = STABILIZE_REQ;
-}
-
-PennChordMessage::StabilizeRsp
-PennChordMessage::GetStabilizeRsp ()
-{
-  return m_message.stabilizeRsp;
-}
-
-void
-PennChordMessage::SetStabilizeRsp (Ipv4Address predecessor)
-{
-  m_messageType = STABILIZE_RSP;
-  m_message.stabilizeRsp.predecessor = predecessor;
-}
-
-PennChordMessage::Notify
-PennChordMessage::GetNotify ()
-{
-  return m_message.notify;
-}
-
-void
-PennChordMessage::SetNotify (Ipv4Address potentialPred)
-{
-  m_messageType = NOTIFY_MSG;
-  m_message.notify.potentialPred = potentialPred;
+  m_message.ringstateMsg.initiatorNode = initiator;
 }
 
 void
@@ -659,4 +535,62 @@ uint32_t
 PennChordMessage::GetTransactionId (void) const
 {
   return m_transactionId;
+}
+
+/* =====================================================================
+   MS2B STABILIZATION METHODS (GET_PREDECESSOR_RSP / NOTIFY)
+   ===================================================================== */
+
+/* GET_PREDECESSOR_RSP */
+uint32_t PennChordMessage::GetPredecessorRsp::GetSerializedSize() const {
+    return IPV4_ADDRESS_SIZE;
+}
+void PennChordMessage::GetPredecessorRsp::Print(std::ostream &os) const {
+    os << "GetPredecessorRsp: " << predecessorNode << "\n";
+}
+void PennChordMessage::GetPredecessorRsp::Serialize(Buffer::Iterator &i) const {
+    i.WriteHtonU32(predecessorNode.Get());
+}
+uint32_t PennChordMessage::GetPredecessorRsp::Deserialize(Buffer::Iterator &i) {
+    predecessorNode = Ipv4Address(i.ReadNtohU32());
+    return GetSerializedSize();
+}
+
+/* NOTIFY_MSG */
+uint32_t PennChordMessage::NotifyMsg::GetSerializedSize() const {
+    return IPV4_ADDRESS_SIZE;
+}
+void PennChordMessage::NotifyMsg::Print(std::ostream &os) const {
+    os << "NotifyMsg: PotentialPred=" << potentialPredecessor << "\n";
+}
+void PennChordMessage::NotifyMsg::Serialize(Buffer::Iterator &i) const {
+    i.WriteHtonU32(potentialPredecessor.Get());
+}
+uint32_t PennChordMessage::NotifyMsg::Deserialize(Buffer::Iterator &i) {
+    potentialPredecessor = Ipv4Address(i.ReadNtohU32());
+    return GetSerializedSize();
+}
+
+/* STABILIZATION ACCESSORS */
+
+void PennChordMessage::SetGetPredecessorReq() {
+    m_messageType = GET_PREDECESSOR_REQ;
+}
+
+PennChordMessage::GetPredecessorRsp PennChordMessage::GetGetPredecessorRsp() {
+    return m_message.getPredecessorRsp;
+}
+
+void PennChordMessage::SetGetPredecessorRsp(Ipv4Address pred) {
+    m_messageType = GET_PREDECESSOR_RSP;
+    m_message.getPredecessorRsp.predecessorNode = pred;
+}
+
+PennChordMessage::NotifyMsg PennChordMessage::GetNotifyMsg() {
+    return m_message.notifyMsg;
+}
+
+void PennChordMessage::SetNotifyMsg(Ipv4Address node) {
+    m_messageType = NOTIFY_MSG;
+    m_message.notifyMsg.potentialPredecessor = node;
 }
