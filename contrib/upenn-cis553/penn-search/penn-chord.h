@@ -40,15 +40,18 @@ class PennChord : public PennApplication
     void SetPingFailureCallback (Callback <void, Ipv4Address, std::string> pingFailureFn);
     void SetPingRecvCallback (Callback <void, Ipv4Address, std::string> pingRecvFn);
 
+    // MS2A Callbacks
     void SetLookupResultCallback (Callback<void, uint32_t, Ipv4Address> lookupResultFn);
     void IssueChordLookup (uint32_t keyHash, Ipv4Address originator);
     void SetSearchLookupCallback (Callback<void, std::string, Ipv4Address> cb);
     void StartSearchLookup (std::string contextKey, uint32_t keyHash);
     void SetPublishLookupCallback (Callback<void, std::string, std::string, Ipv4Address> cb);
     void StartPublishLookup (const std::string &keyword, const std::string &docId, uint32_t keyHash);
+    
+    // Data Transfer Callback
     void SetTransferKeysCallback (Callback<void, Ipv4Address, uint32_t, uint32_t> cb);
 
-    // Handlers
+    // Message Handlers
     void ProcessLookupReq (PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessLookupForward (PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessLookupRsp (PennChordMessage message, Ipv4Address sourceAddress);
@@ -115,8 +118,8 @@ class PennChord : public PennApplication
     Ipv4Address m_successor;
     Ipv4Address m_predecessor;
     
-    // FIX: Saved successor to act as a bridge after leaving
-    Ipv4Address m_savedSuccessor; 
+    // FIX: Saved successor for Dying Bridge logic
+    Ipv4Address m_savedSuccessor;
 
     static std::set<Ipv4Address> s_joined;
 };
