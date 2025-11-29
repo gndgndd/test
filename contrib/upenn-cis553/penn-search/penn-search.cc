@@ -196,7 +196,7 @@ PennSearch::StartSearchFromOrigin (const std::vector<std::string> &terms, const 
 void
 PennSearch::SendPing (std::string nodeId, std::string pingMessage)
 {
-  SEARCH_LOG ("Sending Ping via Chord Layer to node: " << nodeId << " Message: " << pingMessage);
+  // REMOVED LOGS
   Ipv4Address destAddress = ResolveNodeIpAddress (nodeId);
   m_chord->SendPing (destAddress, pingMessage);
 }
@@ -206,7 +206,7 @@ PennSearch::SendPennSearchPing (Ipv4Address destAddress, std::string pingMessage
 {
   if (destAddress != Ipv4Address::GetAny ()) {
       uint32_t transactionId = GetNextTransactionId ();
-      SEARCH_LOG ("Sending PING_REQ to Node: " << ReverseLookup (destAddress) << " IP: " << destAddress << " Message: " << pingMessage);
+      // REMOVED LOGS
       Ptr<PingRequest> pingRequest = Create<PingRequest> (transactionId, Simulator::Now (), destAddress, pingMessage);
       m_pingTracker.insert (std::make_pair (transactionId, pingRequest));
       Ptr<Packet> packet = Create<Packet> ();
@@ -243,8 +243,8 @@ void
 PennSearch::ProcessSearchReq (PennSearchMessage message, Ipv4Address source, uint16_t port)
 {
   auto req = message.GetSearchReq ();
-  SEARCH_LOG ("SEARCH_REQ keyword=" << req.currentKeyword << " remaining=" << req.remainingTerms);
-
+  // REMOVED CHATTY SEARCH LOG
+  
   if (req.currentDocs == "__INIT__") {
       std::vector<std::string> terms;
       std::stringstream ss (req.remainingTerms);
@@ -418,8 +418,7 @@ void PennSearch::DistributedInvertedListMaintenanceStub () {}
 
 void PennSearch::ProcessPingReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
 {
-  std::string fromNode = ReverseLookup (sourceAddress);
-  SEARCH_LOG ("Received PING_REQ, From Node: " << fromNode << ", Message: " << message.GetPingReq ().pingMessage);
+  // REMOVED LOGS
   PennSearchMessage resp = PennSearchMessage (PennSearchMessage::PING_RSP, message.GetTransactionId ());
   resp.SetPingRsp (message.GetPingReq ().pingMessage);
   Ptr<Packet> packet = Create<Packet> ();

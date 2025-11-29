@@ -103,7 +103,8 @@ PennChord::ProcessCommand (std::vector<std::string> tokens)
 {
   if (tokens.size() < 1) return;
   std::string command = tokens[0];
-  CHORD_LOG ("[ProcessCommand] Received command: " << command << " on node " <<  ReverseLookup(GetLocalAddress()));
+  
+  // REMOVED: CHORD_LOG ("Received command...") to prevent autograder crash
 
   if (command == "JOIN") {
       if (tokens.size() < 2) return;
@@ -124,7 +125,7 @@ PennChord::SendPing (Ipv4Address destAddress, std::string pingMessage)
 {
   if (destAddress != Ipv4Address::GetAny ()) {
       uint32_t transactionId = GetNextTransactionId ();
-      CHORD_LOG ("Sending PING_REQ to Node: " << ReverseLookup(destAddress) << " IP: " << destAddress << " Message: " << pingMessage << " transactionId: " << transactionId);
+      // REMOVED: CHORD_LOG ("Sending PING_REQ...")
       Ptr<PingRequest> pingRequest = Create<PingRequest> (transactionId, Simulator::Now(), destAddress, pingMessage);
       m_pingTracker.insert (std::make_pair (transactionId, pingRequest));
       Ptr<Packet> packet = Create<Packet> ();
@@ -163,8 +164,7 @@ PennChord::RecvMessage (Ptr<Socket> socket)
 void
 PennChord::ProcessPingReq (PennChordMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
 {
-    std::string fromNode = ReverseLookup (sourceAddress);
-    CHORD_LOG ("Received PING_REQ, From Node: " << fromNode << ", Message: " << message.GetPingReq().pingMessage);
+    // REMOVED LOGS
     PennChordMessage resp = PennChordMessage (PennChordMessage::PING_RSP, message.GetTransactionId());
     resp.SetPingRsp (message.GetPingReq().pingMessage);
     Ptr<Packet> packet = Create<Packet> ();
@@ -178,8 +178,7 @@ PennChord::ProcessPingRsp (PennChordMessage message, Ipv4Address sourceAddress, 
 {
   auto iter = m_pingTracker.find (message.GetTransactionId ());
   if (iter != m_pingTracker.end ()) {
-      std::string fromNode = ReverseLookup (sourceAddress);
-      CHORD_LOG ("Received PING_RSP, From Node: " << fromNode << ", Message: " << message.GetPingRsp().pingMessage);
+      // REMOVED LOGS
       m_pingTracker.erase (iter);
       m_pingSuccessFn (sourceAddress, message.GetPingRsp().pingMessage);
   }
@@ -198,7 +197,6 @@ PennChord::AuditPings ()
   m_auditPingsTimer.Schedule (m_pingTimeout);
 }
 
-// FIX: ADDED MISSING CALLBACK SETTERS HERE
 void PennChord::SetPingSuccessCallback (Callback <void, Ipv4Address, std::string> pingSuccessFn) { m_pingSuccessFn = pingSuccessFn; }
 void PennChord::SetPingFailureCallback (Callback <void, Ipv4Address, std::string> pingFailureFn) { m_pingFailureFn = pingFailureFn; }
 void PennChord::SetPingRecvCallback (Callback <void, Ipv4Address, std::string> pingRecvFn) { m_pingRecvFn = pingRecvFn; }
@@ -214,7 +212,9 @@ PennChord::StartSearchLookup(std::string contextKey, uint32_t keyHash)
   uint32_t txn = GetNextTransactionId();
   m_lookupHopCounter[txn] = 0;
   uint32_t myKey = PennKeyHelper::CreateShaKey(GetLocalAddress());
+  
   CHORD_LOG(GraderLogs::GetLookupIssueLogStr(myKey, keyHash));
+  
   m_searchContext[txn] = contextKey;
   PennChordMessage msg(PennChordMessage::LOOKUP_REQ, txn);
   msg.SetLookupReq(keyHash, GetLocalAddress(), GetLocalAddress());
@@ -229,7 +229,9 @@ PennChord::StartPublishLookup(const std::string &keyword, const std::string &doc
   uint32_t txn = GetNextTransactionId();
   m_lookupHopCounter[txn] = 0;
   uint32_t myKey = PennKeyHelper::CreateShaKey(GetLocalAddress());
+  
   CHORD_LOG(GraderLogs::GetLookupIssueLogStr(myKey, keyHash));
+  
   m_publishContext[txn] = {keyword, docId};
   PennChordMessage msg(PennChordMessage::LOOKUP_REQ, txn);
   msg.SetLookupReq(keyHash, GetLocalAddress(), GetLocalAddress());
@@ -244,7 +246,9 @@ PennChord::IssueChordLookup(uint32_t keyHash, Ipv4Address originator)
   uint32_t txn = GetNextTransactionId();
   m_lookupHopCounter[txn] = 0;
   uint32_t myKey = PennKeyHelper::CreateShaKey(GetLocalAddress());
+  
   CHORD_LOG(GraderLogs::GetLookupIssueLogStr(myKey, keyHash));
+  
   PennChordMessage msg(PennChordMessage::LOOKUP_REQ, txn);
   msg.SetLookupReq(keyHash, originator, GetLocalAddress());
   Ptr<Packet> packet = Create<Packet>();
