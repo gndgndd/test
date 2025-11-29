@@ -1,21 +1,4 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * Copyright (c) 2010 University of Pennsylvania
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
-
 #ifndef PENN_CHORD_H
 #define PENN_CHORD_H
 
@@ -52,37 +35,31 @@ class PennChord : public PennApplication
     uint32_t GetNextTransactionId ();
     void StopChord ();
 
-    // Callback with Application Layer (add more when required)
+    // Callbacks
     void SetPingSuccessCallback (Callback <void, Ipv4Address, std::string> pingSuccessFn);
     void SetPingFailureCallback (Callback <void, Ipv4Address, std::string> pingFailureFn);
     void SetPingRecvCallback (Callback <void, Ipv4Address, std::string> pingRecvFn);
 
-    // ==============================================================
-    // Milestone 2A - Lookup callbacks and drivers
-    // ==============================================================
-
-    // Generic callback: key hash -> owner node
+    // MS2A Callbacks
     void SetLookupResultCallback (Callback<void, uint32_t, Ipv4Address> lookupResultFn);
-
-    // Driver used by tests / PennSearch to kick off a Chord lookup
     void IssueChordLookup (uint32_t keyHash, Ipv4Address originator);
-
-    // ---- Search-specific lookup support ----
     void SetSearchLookupCallback (Callback<void, std::string, Ipv4Address> cb);
     void StartSearchLookup (std::string contextKey, uint32_t keyHash);
-
-    // ---- Publish-specific lookup support ----
     void SetPublishLookupCallback (Callback<void, std::string, std::string, Ipv4Address> cb);
-    void StartPublishLookup (const std::string &keyword,
-                             const std::string &docId,
-                             uint32_t keyHash);
+    void StartPublishLookup (const std::string &keyword, const std::string &docId, uint32_t keyHash);
+    
+    // Data Transfer Callback
+    void SetTransferKeysCallback (Callback<void, Ipv4Address, uint32_t, uint32_t> cb);
 
-    // Chord-internal handling of LOOKUP_* messages
+    // Message Handlers
     void ProcessLookupReq (PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessLookupForward (PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessLookupRsp (PennChordMessage message, Ipv4Address sourceAddress);
+    void ProcessStabilizeReq(PennChordMessage message, Ipv4Address sourceAddress);
+    void ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddress);
+    void ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress);
+    void HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress);
 
-    // From PennApplication
     virtual void ProcessCommand (std::vector<std::string> tokens);
 
   protected:
@@ -97,105 +74,54 @@ class PennChord : public PennApplication
     Time m_pingTimeout;
     uint16_t m_appPort;
 
-    // ==============================================================
-    // PING/AUDIT MEMBERS
-    // ==============================================================
     Timer m_auditPingsTimer;
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
     Callback <void, Ipv4Address, std::string> m_pingSuccessFn;
     Callback <void, Ipv4Address, std::string> m_pingFailureFn;
     Callback <void, Ipv4Address, std::string> m_pingRecvFn;
 
-    // ==============================================================
-    // Milestone 2A - lookup state and callbacks
-    // ==============================================================
-
-    // Generic "key owner" callback
     Callback<void, uint32_t, Ipv4Address> m_lookupResultFn;
-
-    // Tracks how many hops each lookup has taken (txn -> hopCount)
     std::map<uint32_t, uint32_t> m_lookupHopCounter;
-
-    // Search context: txn -> search context key
     std::map<uint32_t, std::string> m_searchContext;
     Callback<void, std::string, Ipv4Address> m_searchLookupFn;
-
-    // Publish context: txn -> (keyword, docId)
     std::map<uint32_t, std::pair<std::string, std::string> > m_publishContext;
     Callback<void, std::string, std::string, Ipv4Address> m_publishLookupFn;
+    Callback<void, Ipv4Address, uint32_t, uint32_t> m_transferKeysFn;
 
-    // ==============================================================
-    // Milestone 1 - Chord ring management
-    // ==============================================================
-
+    // Chord Protocol
     void CreateChord();
     void LeaveChord();
     void JoinChord(Ipv4Address referenceNode);
-    void Ringstate();
-
-    // ==============================================================
-    // Updated Chord Ring Network Management
-    // ==============================================================
+    void StartRingstate(); // Distributed ring state
+    void Stabilize ();     // Timer callback
     
-    void StartRingstate();
-    void HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress);
-
-    // ==============================================================
-    // Milestone 1/2 - Stabilization + Notify
-    // ==============================================================
-
-    void Stabilize ();                 // runs ring stabilization logic
-    void Notify (Ipv4Address node);    // updates predecessor if needed, triggers data transfer
-    // Helper for hash-space checks (target in (start, end))
+    // Helper
     bool IsBetween (Ipv4Address target, Ipv4Address start, Ipv4Address end); 
+    void TransferKeys(Ipv4Address newOwner, uint32_t rangeStart, uint32_t rangeEnd);
 
-    // MS2: Network Stabilization
-    void StartStabilize();
-    void ProcessStabilizeReq(PennChordMessage message);
-    void ProcessStabilizeRsp(PennChordMessage message);
-    void ProcessNotifyMsg(PennChordMessage message);
-    bool IsInBetween(uint32_t idToCheck, uint32_t start, uint32_t end) const;
-
-    // MS2 FIX: Data transfer method
-    void TransferKeys(Ipv4Address newOwner, Ipv4Address oldOwner, Ipv4Address predOfNewOwner);
-
-
-    // ==============================================================
-    // Milestone 2A - Finger Table (for O(log N) routing)
-    // ==============================================================
-
-    struct FingerEntry
-    {
-      uint32_t start;       // The ID this finger is responsible for: (n + 2^(i-1)) mod 2^m
-      Ipv4Address successor; // The IP address of the successor
+    // Finger Table
+    struct FingerEntry {
+      uint32_t start;
+      Ipv4Address successor;
     };
-
-    std::vector<FingerEntry> m_fingerTable; // Finger table (size m=32 for 32-bit hash)
-    uint32_t m_fingerIndex;                 // Index used by FixFingers
-
+    std::vector<FingerEntry> m_fingerTable;
+    uint32_t m_fingerIndex;
     void InitFingerTable();
     void FixFingers();
-    Ipv4Address FindSuccessor(uint32_t id); // Main lookup function
-    Ipv4Address ClosestPrecedingFinger(uint32_t id); // Helper for FindSuccessor
+    Ipv4Address FindSuccessor(uint32_t id); 
+    Ipv4Address ClosestPrecedingFinger(uint32_t id); 
 
-    // ==============================================================
-    // Milestone 2A - Stabilization Timers (Declared after m_fingerIndex)
-    // ==============================================================
     Timer m_stabilizeTimer;
     Timer m_fixFingersTimer;
     void StartPeriodicStabilization();
 
-
-    // Helpers
     static std::string ToHexKey (uint32_t value);
-    void SendRingstate (Ipv4Address target);
 
-    Ipv4Address m_successor;           // node's immediate successor
-    Ipv4Address m_predecessor;         // node's immediate predecessor
-
-    // Global ring tracking (simulated for M1/M2)
+    Ipv4Address m_successor;
+    Ipv4Address m_predecessor;
+    
+    // We keep s_joined only to gate periodic timers, not for logic
     static std::set<Ipv4Address> s_joined;
-    static std::map<Ipv4Address, Ipv4Address> m_successorPredecessor;
 };
 
 #endif
