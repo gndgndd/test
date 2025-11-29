@@ -58,6 +58,10 @@ class PennChord : public PennApplication
     void ProcessStabilizeReq(PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress);
+    
+    // NEW: Handle Set Successor Request
+    void ProcessSetSuccReq(PennChordMessage message, Ipv4Address sourceAddress);
+    
     void HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress);
 
     virtual void ProcessCommand (std::vector<std::string> tokens);
@@ -88,18 +92,15 @@ class PennChord : public PennApplication
     Callback<void, std::string, std::string, Ipv4Address> m_publishLookupFn;
     Callback<void, Ipv4Address, uint32_t, uint32_t> m_transferKeysFn;
 
-    // Chord Protocol
     void CreateChord();
     void LeaveChord();
     void JoinChord(Ipv4Address referenceNode);
-    void StartRingstate(); // Distributed ring state
-    void Stabilize ();     // Timer callback
+    void StartRingstate();
+    void Stabilize ();
     
-    // Helper
     bool IsBetween (Ipv4Address target, Ipv4Address start, Ipv4Address end); 
     void TransferKeys(Ipv4Address newOwner, uint32_t rangeStart, uint32_t rangeEnd);
 
-    // Finger Table
     struct FingerEntry {
       uint32_t start;
       Ipv4Address successor;
@@ -119,8 +120,6 @@ class PennChord : public PennApplication
 
     Ipv4Address m_successor;
     Ipv4Address m_predecessor;
-    
-    // We keep s_joined only to gate periodic timers, not for logic
     static std::set<Ipv4Address> s_joined;
 };
 
