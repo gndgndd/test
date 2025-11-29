@@ -39,6 +39,7 @@ PennChord::PennChord ()
 {
   Ptr<UniformRandomVariable> m_uniformRandomVariable = CreateObject<UniformRandomVariable> ();
   m_currentTransactionId = m_uniformRandomVariable->GetValue (0x00000000, 0xFFFFFFFF);
+  m_savedSuccessor = Ipv4Address::GetAny(); // Init
 }
 
 PennChord::~PennChord () {}
@@ -146,6 +147,27 @@ PennChord::RecvMessage (Ptr<Socket> socket)
 
   bool isJoined = (s_joined.count(GetLocalAddress()) > 0);
   
+  // DYING BRIDGE LOGIC:
+  // If we are NOT joined, but we have a saved successor, we forward critical messages.
+  if (!isJoined && m_savedSuccessor != Ipv4Address::GetAny()) {
+      switch (message.GetMessageType()) {
+          case PennChordMessage::RINGSTATE_MSG:
+          case PennChordMessage::LOOKUP_REQ:
+          case PennChordMessage::LOOKUP_FORWARD:
+              // Simply forward packet as-is to saved successor
+              {
+                  // We must re-add header since RemoveHeader stripped it
+                  packet->AddHeader(message);
+                  m_socket->SendTo(packet, 0, InetSocketAddress(m_savedSuccessor, m_appPort));
+              }
+              return; // Done
+          default:
+              // For other messages (Stabilize, etc.), we let them drop.
+              // We only process PING below.
+              break;
+      }
+  }
+
   switch (message.GetMessageType ()) {
       case PennChordMessage::PING_REQ: ProcessPingReq (message, sourceAddress, sourcePort); break;
       case PennChordMessage::PING_RSP: ProcessPingRsp (message, sourceAddress, sourcePort); break;
@@ -368,7 +390,7 @@ PennChord::CreateChord()
   m_predecessor = Ipv4Address::GetAny();
   s_joined.insert(GetLocalAddress());
   InitFingerTable();
-  StartPeriodicStabilization();
+  Simulator::ScheduleNow(&PennChord::Stabilize, this); 
 }
 
 void
@@ -378,12 +400,13 @@ PennChord::JoinChord(Ipv4Address referenceNode)
   m_predecessor = Ipv4Address::GetAny();
   m_successor = referenceNode;
   InitFingerTable();
-  StartPeriodicStabilization();
+  Simulator::ScheduleNow(&PennChord::Stabilize, this); 
 }
 
 void
 PennChord::LeaveChord()
 {
+  // 1. Transfer keys to successor
   if (m_successor != Ipv4Address::GetAny() && m_successor != GetLocalAddress()) {
       uint32_t predHash = (m_predecessor == Ipv4Address::GetAny()) ? 0 : PennKeyHelper::CreateShaKey(m_predecessor);
       uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
@@ -403,6 +426,9 @@ PennChord::LeaveChord()
           m_socket->SendTo(p2, 0, InetSocketAddress(m_predecessor, m_appPort));
       }
   }
+
+  // FIX: Save successor before clearing, to act as bridge
+  m_savedSuccessor = m_successor;
 
   m_successor = Ipv4Address::GetAny();
   m_predecessor = Ipv4Address::GetAny();
@@ -585,7 +611,6 @@ PennChord::HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress)
   uint32_t predHash = PennKeyHelper::CreateShaKey(pred);
   GraderLogs::RingState(curr, ReverseLookup(curr), currHash, pred, ReverseLookup(pred), predHash, succ, ReverseLookup(succ), succHash);
   
-  // FIX: Explicit Type Scoping
   PennChordMessage::RingstateMsg rMsg = message.GetRingstateMsg();
   Ipv4Address initNode = rMsg.initiatorNode;
   uint16_t hops = rMsg.hopCount;
