@@ -1,21 +1,4 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
-/*
- * Copyright (c) 2010 University of Pennsylvania
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
-
 #ifndef PENN_CHORD_H
 #define PENN_CHORD_H
 
@@ -52,7 +35,7 @@ class PennChord : public PennApplication
     uint32_t GetNextTransactionId ();
     void StopChord ();
 
-    // Callback with Application Layer (add more when required)
+    // Callback with Application Layer
     void SetPingSuccessCallback (Callback <void, Ipv4Address, std::string> pingSuccessFn);
     void SetPingFailureCallback (Callback <void, Ipv4Address, std::string> pingFailureFn);
     void SetPingRecvCallback (Callback <void, Ipv4Address, std::string> pingRecvFn);
@@ -76,6 +59,11 @@ class PennChord : public PennApplication
     void StartPublishLookup (const std::string &keyword,
                              const std::string &docId,
                              uint32_t keyHash);
+
+    // ---- Data Transfer Support (Join/Leave) ----
+    // Callback to tell PennSearch to transfer keys to a new owner
+    // Args: destinationNode, rangeStart, rangeEnd
+    void SetTransferKeysCallback (Callback<void, Ipv4Address, uint32_t, uint32_t> cb);
 
     // Chord-internal handling of LOOKUP_* messages
     void ProcessLookupReq (PennChordMessage message, Ipv4Address sourceAddress);
@@ -123,6 +111,9 @@ class PennChord : public PennApplication
     // Publish context: txn -> (keyword, docId)
     std::map<uint32_t, std::pair<std::string, std::string> > m_publishContext;
     Callback<void, std::string, std::string, Ipv4Address> m_publishLookupFn;
+    
+    // Transfer Keys callback
+    Callback<void, Ipv4Address, uint32_t, uint32_t> m_transferKeysFn;
 
     // ==============================================================
     // Milestone 1 - Chord ring management
@@ -156,9 +147,8 @@ class PennChord : public PennApplication
     void ProcessNotifyMsg(PennChordMessage message);
     bool IsInBetween(uint32_t idToCheck, uint32_t start, uint32_t end) const;
 
-    // MS2 FIX: Data transfer method
-    void TransferKeys(Ipv4Address newOwner, Ipv4Address oldOwner, Ipv4Address predOfNewOwner);
-
+    // Data transfer method
+    void TransferKeys(Ipv4Address newOwner, uint32_t rangeStart, uint32_t rangeEnd);
 
     // ==============================================================
     // Milestone 2A - Finger Table (for O(log N) routing)
@@ -179,16 +169,14 @@ class PennChord : public PennApplication
     Ipv4Address ClosestPrecedingFinger(uint32_t id); // Helper for FindSuccessor
 
     // ==============================================================
-    // Milestone 2A - Stabilization Timers (Declared after m_fingerIndex)
+    // Milestone 2A - Stabilization Timers
     // ==============================================================
     Timer m_stabilizeTimer;
     Timer m_fixFingersTimer;
     void StartPeriodicStabilization();
 
-
     // Helpers
     static std::string ToHexKey (uint32_t value);
-    void SendRingstate (Ipv4Address target);
 
     Ipv4Address m_successor;           // node's immediate successor
     Ipv4Address m_predecessor;         // node's immediate predecessor

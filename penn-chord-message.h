@@ -32,19 +32,19 @@ class PennChordMessage : public Header
     PennChordMessage ();
     virtual ~PennChordMessage ();
 
+    // In penn-chord-message.h, inside enum MessageType:
     enum MessageType
     {
       PING_REQ = 1,
       PING_RSP = 2,
-      // Define extra message types when needed
-      // *** MS2A ADDITIONS (Chord Lookup Messages) ***
-      LOOKUP_REQ = 3,       // Lookup request for a key
-      LOOKUP_FORWARD = 4,   // Forwards lookup along ring (needed for autograder)
-      LOOKUP_RSP = 5,        // Lookup result returning to requester
-      RINGSTATE_MSG = 6,     // Message to trigger ringstate logging
-      STABILIZE_REQ = 7,     // Request successor's predessesor for Stabilize()
-      STABILIZE_RSP = 8,     // Return predessor in response to request
-      NOTIFY_MSG = 9         // Sends possible predecessor update for Notify()
+      LOOKUP_REQ = 3,
+      LOOKUP_FORWARD = 4,
+      LOOKUP_RSP = 5,
+      RINGSTATE_MSG = 6,
+      STABILIZE_REQ = 7,
+      STABILIZE_RSP = 8,
+      NOTIFY_MSG = 9,
+      LEAVE_REQ = 10  // <--- ADD THIS
     };
 
     PennChordMessage (PennChordMessage::MessageType messageType, uint32_t transactionId);
