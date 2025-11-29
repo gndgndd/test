@@ -58,7 +58,10 @@ class PennChord : public PennApplication
     void ProcessStabilizeReq(PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress);
+    
+    // Handle Set Successor Request (Immediate Patch)
     void ProcessSetSuccReq(PennChordMessage message, Ipv4Address sourceAddress);
+    
     void HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress);
 
     virtual void ProcessCommand (std::vector<std::string> tokens);

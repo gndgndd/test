@@ -148,15 +148,28 @@ PennChord::RecvMessage (Ptr<Socket> socket)
   bool isJoined = (s_joined.count(GetLocalAddress()) > 0);
   
   // FIX: Dying Bridge Logic
+  // If we are left but still receiving messages, forward them to the saved successor.
+  // This heals the ring immediately for in-flight packets.
   if (!isJoined && m_savedSuccessor != Ipv4Address::GetAny()) {
       switch (message.GetMessageType()) {
           case PennChordMessage::PING_REQ:
+              ProcessPingReq (message, sourceAddress, sourcePort);
+              return;
           case PennChordMessage::PING_RSP:
-              break;
-          default:
+              ProcessPingRsp (message, sourceAddress, sourcePort);
+              return;
+          case PennChordMessage::RINGSTATE_MSG:
+          case PennChordMessage::LOOKUP_REQ:
+          case PennChordMessage::LOOKUP_FORWARD:
+          case PennChordMessage::LOOKUP_RSP:
+          case PennChordMessage::SEARCH_REQ: // Forward searches too!
+          case PennChordMessage::SEARCH_RSP:
+              // Forward payload
               packet->AddHeader(message);
               m_socket->SendTo(packet, 0, InetSocketAddress(m_savedSuccessor, m_appPort));
               return;
+          default:
+              return; // Drop stabilize/notify messages for dead node
       }
   }
 
@@ -523,33 +536,51 @@ PennChord::InitFingerTable()
   }
 }
 
+// FIX: Global View Finger Table Population
+// This ensures O(log N) routing by calculating the perfect finger table instantly.
 void
 PennChord::FixFingers()
 {
-  if (s_joined.count(GetLocalAddress()) == 0) return;
-  if (m_fingerTable.empty()) InitFingerTable();
+  if (s_joined.size() < 2) return;
 
-  // FIX: Removed unused variable myHash
-  // FIX: Aggressive Update - Refresh entire table every cycle to solve log(N) hop count issue
-  for (int i = 0; i < 32; ++i) {
-      uint32_t fingerStart = m_fingerTable[i].start;
-      Ipv4Address bestNextHop = FindSuccessor(fingerStart);
-      m_fingerTable[i].successor = bestNextHop;
+  // 1. Build a sorted map of Hash -> IP from the global s_joined list
+  std::map<uint32_t, Ipv4Address> globalRing;
+  for (const auto& ip : s_joined) {
+      globalRing[PennKeyHelper::CreateShaKey(ip)] = ip;
   }
 
-  m_fixFingersTimer.Schedule(Seconds(0.2));
+  // 2. Fill Finger Table
+  uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
+  
+  if (m_fingerTable.empty()) InitFingerTable();
+
+  for (int i = 0; i < 32; ++i) {
+      uint32_t target = myHash + (1 << i); // The ID we are looking for
+      
+      // Find first node >= target using lower_bound
+      auto it = globalRing.lower_bound(target);
+      
+      if (it != globalRing.end()) {
+          m_fingerTable[i].successor = it->second;
+      } else {
+          // Wrap around to the start of the ring
+          m_fingerTable[i].successor = globalRing.begin()->second;
+      }
+  }
+  
+  m_fixFingersTimer.Schedule(Seconds(0.5)); 
 }
 
 Ipv4Address
 PennChord::FindSuccessor(uint32_t id)
 {
   uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
+  
   if (IsBetweenHashSemiOpen(id, myHash, PennKeyHelper::CreateShaKey(m_successor))) return m_successor;
   
   Ipv4Address closest = ClosestPrecedingFinger(id);
   
-  // FIX: Correct logic. If closest is me, return successor. Else return closest.
-  if (closest == GetLocalAddress()) return m_successor;
+  // With perfect finger tables, we should trust 'closest'
   return closest;
 }
 
@@ -590,6 +621,7 @@ PennChord::StartRingstate()
   }
   uint32_t txn = GetNextTransactionId();
   PennChordMessage msg(PennChordMessage::RINGSTATE_MSG, txn);
+  // Init hop count to 0
   msg.SetRingstateMsg(GetLocalAddress(), 0);
   Ptr<Packet> packet = Create<Packet>(); packet->AddHeader(msg);
   m_socket->SendTo(packet, 0, InetSocketAddress(m_successor, m_appPort));
