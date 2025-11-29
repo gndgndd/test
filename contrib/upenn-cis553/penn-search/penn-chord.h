@@ -6,6 +6,7 @@
 #include "ns3/penn-chord-message.h"
 #include "ns3/ping-request.h"
 #include <openssl/sha.h>
+
 #include "ns3/ipv4-address.h"
 #include <map>
 #include <set>
@@ -33,34 +34,35 @@ class PennChord : public PennApplication
     void AuditPings ();
     uint32_t GetNextTransactionId ();
     void StopChord ();
-    
-    // Callbacks
+
+    // Callback with Application Layer (add more when required)
     void SetPingSuccessCallback (Callback <void, Ipv4Address, std::string> pingSuccessFn);
     void SetPingFailureCallback (Callback <void, Ipv4Address, std::string> pingFailureFn);
     void SetPingRecvCallback (Callback <void, Ipv4Address, std::string> pingRecvFn);
-    
-    // Core Chord Distributed Logic
-    void Stabilize();
-    void ProcessStabilizeReq(PennChordMessage message);
-    void ProcessStabilizeRsp(PennChordMessage message);
-    void ProcessNotifyPkt(PennChordMessage message);
 
-    bool IsInBetween(uint32_t idToCheck, uint32_t start, uint32_t end) const;
+    // ==============================================================
+    // Milestone 2A – Lookup callbacks and drivers
+    // ==============================================================
 
-    // Lookup callbacks
     void SetLookupResultCallback (Callback<void, uint32_t, Ipv4Address> lookupResultFn);
     void IssueChordLookup (uint32_t keyHash, Ipv4Address originator);
 
+    // ---- Search-specific lookup support ----
     void SetSearchLookupCallback (Callback<void, std::string, Ipv4Address> cb);
     void StartSearchLookup (std::string contextKey, uint32_t keyHash);
 
+    // ---- Publish-specific lookup support ----
     void SetPublishLookupCallback (Callback<void, std::string, std::string, Ipv4Address> cb);
-    void StartPublishLookup (const std::string &keyword, const std::string &docId, uint32_t keyHash);
+    void StartPublishLookup (const std::string &keyword,
+                             const std::string &docId,
+                             uint32_t keyHash);
 
+    // Chord-internal handling of LOOKUP_* messages
     void ProcessLookupReq (PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessLookupForward (PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessLookupRsp (PennChordMessage message, Ipv4Address sourceAddress);
 
+    // From PennApplication
     virtual void ProcessCommand (std::vector<std::string> tokens);
 
   protected:
@@ -75,13 +77,19 @@ class PennChord : public PennApplication
     Time m_pingTimeout;
     uint16_t m_appPort;
 
+    // ==============================================================
+    // PING/AUDIT MEMBERS
+    // ==============================================================
     Timer m_auditPingsTimer;
     std::map<uint32_t, Ptr<PingRequest> > m_pingTracker;
     Callback <void, Ipv4Address, std::string> m_pingSuccessFn;
     Callback <void, Ipv4Address, std::string> m_pingFailureFn;
     Callback <void, Ipv4Address, std::string> m_pingRecvFn;
 
-    // Lookup state
+    // ==============================================================
+    // Milestone 2A – lookup state and callbacks
+    // ==============================================================
+
     Callback<void, uint32_t, Ipv4Address> m_lookupResultFn;
     std::map<uint32_t, uint32_t> m_lookupHopCounter;
     std::map<uint32_t, std::string> m_searchContext;
@@ -89,26 +97,37 @@ class PennChord : public PennApplication
     std::map<uint32_t, std::pair<std::string, std::string> > m_publishContext;
     Callback<void, std::string, std::string, Ipv4Address> m_publishLookupFn;
 
-    // Chord ring management
+    // Join tracking
+    uint32_t m_joinTransactionId; 
+
+    // ==============================================================
+    // Milestone 1 – Chord ring management
+    // ==============================================================
+
     void CreateChord();
     void LeaveChord();
     void JoinChord(Ipv4Address referenceNode);
     void Ringstate();
-    
-    void StartRingstate();
-    void HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress);
 
-    // Distributed Logic
-    void Notify (Ipv4Address node);
-    // Overloaded IsBetween for IP convenience
+    // ==============================================================
+    // Milestone 1/2 – Stabilization + Notify
+    // ==============================================================
+
+    void Stabilize ();                 
+    void Notify (Ipv4Address node);    
     bool IsBetween (Ipv4Address target, Ipv4Address start, Ipv4Address end); 
     void TransferKeys(Ipv4Address newOwner, Ipv4Address oldOwner, Ipv4Address predOfNewOwner);
 
-    // Finger Table
-    struct FingerEntry {
-      uint32_t start;      
-      Ipv4Address successor;
+    // ==============================================================
+    // Milestone 2A – Finger Table (for O(log N) routing)
+    // ==============================================================
+
+    struct FingerEntry
+    {
+      uint32_t start;       
+      Ipv4Address successor; 
     };
+
     std::vector<FingerEntry> m_fingerTable; 
     uint32_t m_fingerIndex;                 
 
@@ -125,7 +144,6 @@ class PennChord : public PennApplication
 
     Ipv4Address m_successor;           
     Ipv4Address m_predecessor;         
-    uint32_t m_nodeHash; // Fixed: added missing member
 
     static std::set<Ipv4Address> s_joined;
     static std::map<Ipv4Address, Ipv4Address> m_successorPredecessor;
