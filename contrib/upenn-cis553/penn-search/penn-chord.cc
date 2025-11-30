@@ -148,7 +148,6 @@ PennChord::RecvMessage (Ptr<Socket> socket)
   bool isJoined = (s_joined.count(GetLocalAddress()) > 0);
   
   // FIX: Dying Bridge Logic
-  // This is what was missing in your upload. It forwards SEARCH packets even if !isJoined.
   if (!isJoined && m_savedSuccessor != Ipv4Address::GetAny()) {
       switch (message.GetMessageType()) {
           case PennChordMessage::PING_REQ:
@@ -158,8 +157,6 @@ PennChord::RecvMessage (Ptr<Socket> socket)
           case PennChordMessage::LOOKUP_REQ:
           case PennChordMessage::LOOKUP_FORWARD:
           case PennChordMessage::LOOKUP_RSP:
-          case PennChordMessage::SEARCH_REQ: // Forward Search to prevent missing results!
-          case PennChordMessage::SEARCH_RSP: 
               packet->AddHeader(message);
               m_socket->SendTo(packet, 0, InetSocketAddress(m_savedSuccessor, m_appPort));
               return;
@@ -230,7 +227,11 @@ void PennChord::SetTransferKeysCallback (Callback<void, Ipv4Address, uint32_t, u
 void
 PennChord::StartSearchLookup(std::string contextKey, uint32_t keyHash)
 {
-  if (m_successor == Ipv4Address::GetAny()) return;
+  // FIX: Use Saved Successor if current is null (Dying Bridge support)
+  Ipv4Address target = m_successor;
+  if (target == Ipv4Address::GetAny()) target = m_savedSuccessor;
+  if (target == Ipv4Address::GetAny()) return;
+
   uint32_t txn = GetNextTransactionId();
   m_lookupHopCounter[txn] = 0;
   uint32_t myKey = PennKeyHelper::CreateShaKey(GetLocalAddress());
@@ -240,13 +241,16 @@ PennChord::StartSearchLookup(std::string contextKey, uint32_t keyHash)
   msg.SetLookupReq(keyHash, GetLocalAddress(), GetLocalAddress());
   Ptr<Packet> packet = Create<Packet>();
   packet->AddHeader(msg);
-  m_socket->SendTo(packet, 0, InetSocketAddress(m_successor, m_appPort));
+  m_socket->SendTo(packet, 0, InetSocketAddress(target, m_appPort));
 }
 
 void
 PennChord::StartPublishLookup(const std::string &keyword, const std::string &docId, uint32_t keyHash)
 {
-  if (m_successor == Ipv4Address::GetAny()) return;
+  Ipv4Address target = m_successor;
+  if (target == Ipv4Address::GetAny()) target = m_savedSuccessor;
+  if (target == Ipv4Address::GetAny()) return;
+
   uint32_t txn = GetNextTransactionId();
   m_lookupHopCounter[txn] = 0;
   uint32_t myKey = PennKeyHelper::CreateShaKey(GetLocalAddress());
@@ -256,13 +260,16 @@ PennChord::StartPublishLookup(const std::string &keyword, const std::string &doc
   msg.SetLookupReq(keyHash, GetLocalAddress(), GetLocalAddress());
   Ptr<Packet> p = Create<Packet>();
   p->AddHeader(msg);
-  m_socket->SendTo(p, 0, InetSocketAddress(m_successor, m_appPort));
+  m_socket->SendTo(p, 0, InetSocketAddress(target, m_appPort));
 }
 
 void
 PennChord::IssueChordLookup(uint32_t keyHash, Ipv4Address originator)
 {
-  if (m_successor == Ipv4Address::GetAny()) return;
+  Ipv4Address target = m_successor;
+  if (target == Ipv4Address::GetAny()) target = m_savedSuccessor;
+  if (target == Ipv4Address::GetAny()) return;
+
   uint32_t txn = GetNextTransactionId();
   m_lookupHopCounter[txn] = 0;
   uint32_t myKey = PennKeyHelper::CreateShaKey(GetLocalAddress());
@@ -271,7 +278,7 @@ PennChord::IssueChordLookup(uint32_t keyHash, Ipv4Address originator)
   msg.SetLookupReq(keyHash, originator, GetLocalAddress());
   Ptr<Packet> packet = Create<Packet>();
   packet->AddHeader(msg);
-  m_socket->SendTo(packet, 0, InetSocketAddress(m_successor, m_appPort));
+  m_socket->SendTo(packet, 0, InetSocketAddress(target, m_appPort));
 }
 
 static bool IsBetweenHashSemiOpen(uint32_t target, uint32_t start, uint32_t end)
