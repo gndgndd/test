@@ -385,13 +385,11 @@ void
 PennChord::LeaveChord()
 {
   if (m_successor != Ipv4Address::GetAny() && m_successor != GetLocalAddress()) {
-      // FIX: Pass 0,0 (or equal values) to signal "Transfer Everything"
-      // We don't care about ranges when leaving; we dump all data to the successor.
+      // FIX: Use 0,0 to signal Transfer All
       TransferKeys(m_successor, 0, 0);
       
       uint32_t txn1 = GetNextTransactionId();
       PennChordMessage notifyMsg(PennChordMessage::NOTIFY_MSG, txn1);
-      // Notify successor that its new predecessor is my current predecessor
       notifyMsg.SetNotifyMsg(m_predecessor);
       Ptr<Packet> p1 = Create<Packet>(); p1->AddHeader(notifyMsg);
       m_socket->SendTo(p1, 0, InetSocketAddress(m_successor, m_appPort));
@@ -399,15 +397,12 @@ PennChord::LeaveChord()
       if (m_predecessor != Ipv4Address::GetAny()) {
           uint32_t txn2 = GetNextTransactionId();
           PennChordMessage setSuccMsg(PennChordMessage::SET_SUCC_REQ, txn2);
-          // Notify predecessor that its new successor is my current successor
           setSuccMsg.SetSetSuccReq(m_successor);
           Ptr<Packet> p2 = Create<Packet>(); p2->AddHeader(setSuccMsg);
           m_socket->SendTo(p2, 0, InetSocketAddress(m_predecessor, m_appPort));
       }
   }
 
-  // FIX: Do not clear these immediately if you want to be safe, 
-  // but clearing s_joined is the "official" way to die.
   m_successor = Ipv4Address::GetAny();
   m_predecessor = Ipv4Address::GetAny();
   m_fingerTable.clear();
@@ -458,16 +453,13 @@ PennChord::ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddre
 void 
 PennChord::ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress) {
   Ipv4Address candidate = message.GetNotifyMsg().potentialPredessor;
-  
-  // FIX: Explicitly handle the "Leave" notification separately and return early
-  // If the message comes from my CURRENT Predecessor, they are dictating the new Predecessor.
-  // This happens during a Leave. We must accept it unconditionally.
+
+  // FIX: Handle Leave Explicitly First
   if (sourceAddress == m_predecessor) {
       m_predecessor = candidate;
-      return; // Stop processing. We trust our predecessor if they are updating us.
+      return; 
   }
 
-  // Standard Stabilization Logic
   if (m_predecessor == Ipv4Address::GetAny() || IsBetween(candidate, m_predecessor, GetLocalAddress())) {
       Ipv4Address oldPred = m_predecessor;
       m_predecessor = candidate;
@@ -579,7 +571,6 @@ PennChord::StartRingstate()
   }
   uint32_t txn = GetNextTransactionId();
   PennChordMessage msg(PennChordMessage::RINGSTATE_MSG, txn);
-  // Init hop count to 0
   msg.SetRingstateMsg(GetLocalAddress(), 0);
   Ptr<Packet> packet = Create<Packet>(); packet->AddHeader(msg);
   m_socket->SendTo(packet, 0, InetSocketAddress(m_successor, m_appPort));
@@ -596,7 +587,6 @@ PennChord::HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress)
   uint32_t predHash = PennKeyHelper::CreateShaKey(pred);
   GraderLogs::RingState(curr, ReverseLookup(curr), currHash, pred, ReverseLookup(pred), predHash, succ, ReverseLookup(succ), succHash);
   
-  // FIX: Explicit Type Scoping
   PennChordMessage::RingstateMsg rMsg = message.GetRingstateMsg();
   Ipv4Address initNode = rMsg.initiatorNode;
   uint16_t hops = rMsg.hopCount;
