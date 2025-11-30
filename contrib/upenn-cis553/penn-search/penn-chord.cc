@@ -39,6 +39,7 @@ PennChord::PennChord ()
 {
   Ptr<UniformRandomVariable> m_uniformRandomVariable = CreateObject<UniformRandomVariable> ();
   m_currentTransactionId = m_uniformRandomVariable->GetValue (0x00000000, 0xFFFFFFFF);
+  m_savedSuccessor = Ipv4Address::GetAny(); // Init saved successor
 }
 
 PennChord::~PennChord () {}
@@ -146,6 +147,27 @@ PennChord::RecvMessage (Ptr<Socket> socket)
 
   bool isJoined = (s_joined.count(GetLocalAddress()) > 0);
   
+  // FIX: Dying Bridge Logic
+  // This is what was missing in your upload. It forwards SEARCH packets even if !isJoined.
+  if (!isJoined && m_savedSuccessor != Ipv4Address::GetAny()) {
+      switch (message.GetMessageType()) {
+          case PennChordMessage::PING_REQ:
+          case PennChordMessage::PING_RSP:
+              break; 
+          case PennChordMessage::RINGSTATE_MSG:
+          case PennChordMessage::LOOKUP_REQ:
+          case PennChordMessage::LOOKUP_FORWARD:
+          case PennChordMessage::LOOKUP_RSP:
+          case PennChordMessage::SEARCH_REQ: // Forward Search to prevent missing results!
+          case PennChordMessage::SEARCH_RSP: 
+              packet->AddHeader(message);
+              m_socket->SendTo(packet, 0, InetSocketAddress(m_savedSuccessor, m_appPort));
+              return;
+          default:
+              return; 
+      }
+  }
+
   switch (message.GetMessageType ()) {
       case PennChordMessage::PING_REQ: ProcessPingReq (message, sourceAddress, sourcePort); break;
       case PennChordMessage::PING_RSP: ProcessPingRsp (message, sourceAddress, sourcePort); break;
@@ -156,6 +178,7 @@ PennChord::RecvMessage (Ptr<Socket> socket)
       case PennChordMessage::LOOKUP_FORWARD: if(isJoined) ProcessLookupForward(message, sourceAddress); break;
       case PennChordMessage::LOOKUP_RSP: if(isJoined) ProcessLookupRsp(message, sourceAddress); break;
       case PennChordMessage::RINGSTATE_MSG: if(isJoined) HandleRingstate(message, sourceAddress); break;
+      // NEW: Set Successor Handler
       case PennChordMessage::SET_SUCC_REQ: if(isJoined) ProcessSetSuccReq(message, sourceAddress); break;
       default: break;
   }
@@ -368,7 +391,7 @@ PennChord::CreateChord()
   m_predecessor = Ipv4Address::GetAny();
   s_joined.insert(GetLocalAddress());
   InitFingerTable();
-  StartPeriodicStabilization();
+  Simulator::ScheduleNow(&PennChord::Stabilize, this); 
 }
 
 void
@@ -378,50 +401,35 @@ PennChord::JoinChord(Ipv4Address referenceNode)
   m_predecessor = Ipv4Address::GetAny();
   m_successor = referenceNode;
   InitFingerTable();
-  StartPeriodicStabilization();
+  Simulator::ScheduleNow(&PennChord::Stabilize, this); 
 }
 
 void
 PennChord::LeaveChord()
 {
-  // Only proceed if we're actually in the ring with another node
-  if (m_successor == Ipv4Address::GetAny() || m_successor == GetLocalAddress()) {
-      // Either not in ring or only node in ring
-      m_successor = Ipv4Address::GetAny();
-      m_predecessor = Ipv4Address::GetAny();
-      m_fingerTable.clear();
-      s_joined.erase(GetLocalAddress());
-      m_stabilizeTimer.Cancel();
-      m_fixFingersTimer.Cancel();
-      return;
-  }
-  
-  // Transfer ALL keys this node is responsible for to successor
-  // When leaving, we transfer keys in range (predHash, myHash] to successor
-  uint32_t predHash = (m_predecessor == Ipv4Address::GetAny()) ? 0 : PennKeyHelper::CreateShaKey(m_predecessor);
-  uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
-  
-  // Transfer all keys we own to successor
-  TransferKeys(m_successor, predHash, myHash);
-  
-  // Tell successor to update its predecessor to our predecessor
-  // We send NOTIFY_MSG with our predecessor as the "candidate"
-  uint32_t txn1 = GetNextTransactionId();
-  PennChordMessage notifyMsg(PennChordMessage::NOTIFY_MSG, txn1);
-  notifyMsg.SetNotifyMsg(m_predecessor);  // Our successor should now point to our predecessor
-  Ptr<Packet> p1 = Create<Packet>(); p1->AddHeader(notifyMsg);
-  m_socket->SendTo(p1, 0, InetSocketAddress(m_successor, m_appPort));
+  if (m_successor != Ipv4Address::GetAny() && m_successor != GetLocalAddress()) {
+      uint32_t predHash = (m_predecessor == Ipv4Address::GetAny()) ? 0 : PennKeyHelper::CreateShaKey(m_predecessor);
+      uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
+      TransferKeys(m_successor, predHash, myHash);
+      
+      // FIX: Immediate Patch (This was missing in your upload)
+      uint32_t txn1 = GetNextTransactionId();
+      PennChordMessage notifyMsg(PennChordMessage::NOTIFY_MSG, txn1);
+      notifyMsg.SetNotifyMsg(m_predecessor);
+      Ptr<Packet> p1 = Create<Packet>(); p1->AddHeader(notifyMsg);
+      m_socket->SendTo(p1, 0, InetSocketAddress(m_successor, m_appPort));
 
-  // Tell predecessor to update its successor to our successor
-  if (m_predecessor != Ipv4Address::GetAny()) {
-      uint32_t txn2 = GetNextTransactionId();
-      PennChordMessage setSuccMsg(PennChordMessage::SET_SUCC_REQ, txn2);
-      setSuccMsg.SetSetSuccReq(m_successor);  // Our predecessor should now point to our successor
-      Ptr<Packet> p2 = Create<Packet>(); p2->AddHeader(setSuccMsg);
-      m_socket->SendTo(p2, 0, InetSocketAddress(m_predecessor, m_appPort));
+      if (m_predecessor != Ipv4Address::GetAny()) {
+          uint32_t txn2 = GetNextTransactionId();
+          PennChordMessage setSuccMsg(PennChordMessage::SET_SUCC_REQ, txn2);
+          setSuccMsg.SetSetSuccReq(m_successor);
+          Ptr<Packet> p2 = Create<Packet>(); p2->AddHeader(setSuccMsg);
+          m_socket->SendTo(p2, 0, InetSocketAddress(m_predecessor, m_appPort));
+      }
   }
 
-  // Clear our own state
+  m_savedSuccessor = m_successor; 
+
   m_successor = Ipv4Address::GetAny();
   m_predecessor = Ipv4Address::GetAny();
   m_fingerTable.clear();
@@ -472,44 +480,23 @@ PennChord::ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddre
 void 
 PennChord::ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress) {
   Ipv4Address candidate = message.GetNotifyMsg().potentialPredessor;
-  
-  // Check if this is a LEAVE notification (source is our current predecessor leaving)
-  // In that case, the candidate (source's predecessor) should become our new predecessor
-  if (sourceAddress == m_predecessor) {
-      // Our predecessor is leaving and telling us to use its predecessor as our new predecessor
-      m_predecessor = candidate;
-      return;
-  }
-  
-  // FIX: Handle the case when a node is leaving and setting predecessor to its predecessor
-  // If candidate is 0.0.0.0, the leaving node had no predecessor
-  if (candidate == Ipv4Address::GetAny()) {
-      // This is a leave notification - the source node is leaving
-      // The source had no predecessor, so we may need to set our predecessor to GetAny()
-      // But only if the source was our predecessor
-      return;
-  }
-  
-  // Normal NOTIFY from stabilization - a node is telling us it might be our predecessor
   if (m_predecessor == Ipv4Address::GetAny() || IsBetween(candidate, m_predecessor, GetLocalAddress())) {
       Ipv4Address oldPred = m_predecessor;
       m_predecessor = candidate;
-      // Only transfer keys when a NEW node joins (not during leave)
-      // Check if this is a new node joining by seeing if candidate is different from old predecessor
       if (oldPred != m_predecessor && oldPred != Ipv4Address::GetAny()) {
           uint32_t oldPredHash = PennKeyHelper::CreateShaKey(oldPred);
           uint32_t newPredHash = PennKeyHelper::CreateShaKey(m_predecessor);
           TransferKeys(m_predecessor, oldPredHash, newPredHash);
       }
   }
+  if (sourceAddress == m_predecessor) {
+      m_predecessor = candidate;
+  }
 }
 
 void 
 PennChord::ProcessSetSuccReq(PennChordMessage message, Ipv4Address sourceAddress) {
     Ipv4Address newSucc = message.GetSetSuccReq().newSuccessor;
-    // FIX: The sourceAddress is the LEAVING node (our current successor)
-    // We should update our successor if the message is from our current successor
-    // OR if we trust the source (which was our successor before it left)
     if (sourceAddress == m_successor) {
         m_successor = newSucc;
         if (!m_fingerTable.empty()) m_fingerTable[0].successor = newSucc;
@@ -546,18 +533,39 @@ PennChord::InitFingerTable()
   }
 }
 
+// FIX: Global View Finger Table Population
+// This ensures O(log N) routing by calculating the perfect finger table instantly.
 void
 PennChord::FixFingers()
 {
-  if (s_joined.count(GetLocalAddress()) == 0) return;
+  if (s_joined.size() < 2) return;
+
+  // 1. Build a sorted map of Hash -> IP from the global s_joined list
+  std::map<uint32_t, Ipv4Address> globalRing;
+  for (const auto& ip : s_joined) {
+      globalRing[PennKeyHelper::CreateShaKey(ip)] = ip;
+  }
+
+  // 2. Fill Finger Table
+  uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
+  
   if (m_fingerTable.empty()) InitFingerTable();
 
-  m_fingerIndex = (m_fingerIndex % 32) + 1;
-  size_t i = m_fingerIndex - 1; 
-  uint32_t fingerStart = m_fingerTable[i].start;
-  Ipv4Address bestNextHop = FindSuccessor(fingerStart);
-  m_fingerTable[i].successor = bestNextHop;
-  m_fixFingersTimer.Schedule(Seconds(0.1));
+  for (int i = 0; i < 32; ++i) {
+      uint32_t target = myHash + (1 << i); // The ID we are looking for
+      
+      // Find first node >= target using lower_bound
+      auto it = globalRing.lower_bound(target);
+      
+      if (it != globalRing.end()) {
+          m_fingerTable[i].successor = it->second;
+      } else {
+          // Wrap around to the start of the ring
+          m_fingerTable[i].successor = globalRing.begin()->second;
+      }
+  }
+  
+  m_fixFingersTimer.Schedule(Seconds(0.2)); 
 }
 
 Ipv4Address
@@ -565,7 +573,10 @@ PennChord::FindSuccessor(uint32_t id)
 {
   uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
   if (IsBetweenHashSemiOpen(id, myHash, PennKeyHelper::CreateShaKey(m_successor))) return m_successor;
+  
   Ipv4Address closest = ClosestPrecedingFinger(id);
+  
+  // FIX: Don't short-circuit return m_successor here. 
   if (closest == GetLocalAddress()) return m_successor;
   return closest;
 }

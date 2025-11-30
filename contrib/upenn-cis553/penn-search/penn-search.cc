@@ -196,6 +196,7 @@ PennSearch::StartSearchFromOrigin (const std::vector<std::string> &terms, const 
 void
 PennSearch::SendPing (std::string nodeId, std::string pingMessage)
 {
+  // REMOVED LOGS
   Ipv4Address destAddress = ResolveNodeIpAddress (nodeId);
   m_chord->SendPing (destAddress, pingMessage);
 }
@@ -205,6 +206,7 @@ PennSearch::SendPennSearchPing (Ipv4Address destAddress, std::string pingMessage
 {
   if (destAddress != Ipv4Address::GetAny ()) {
       uint32_t transactionId = GetNextTransactionId ();
+      // REMOVED LOGS
       Ptr<PingRequest> pingRequest = Create<PingRequest> (transactionId, Simulator::Now (), destAddress, pingMessage);
       m_pingTracker.insert (std::make_pair (transactionId, pingRequest));
       Ptr<Packet> packet = Create<Packet> ();
@@ -241,6 +243,7 @@ void
 PennSearch::ProcessSearchReq (PennSearchMessage message, Ipv4Address source, uint16_t port)
 {
   auto req = message.GetSearchReq ();
+  // REMOVED CHATTY SEARCH LOG
   
   if (req.currentDocs == "__INIT__") {
       std::vector<std::string> terms;
@@ -361,45 +364,21 @@ PennSearch::ProcessStoreReq (PennSearchMessage message, Ipv4Address source, uint
   SEARCH_LOG (GraderLogs::GetStoreLogStr (s.keyword, s.docId));
 }
 
-// FIX: Improved key transfer logic
-// When a node LEAVES, it transfers ALL its keys to successor
-// The rangeStart and rangeEnd parameters indicate which keys this node owned
-// (predHash, myHash] - but for leave, we should transfer everything we have
 static bool IsBetweenSemiOpen(uint32_t target, uint32_t start, uint32_t end)
 {
-    // Check if target is in (start, end]
     if (start < end) return (target > start && target <= end);
     else if (start > end) return (target > start || target <= end);
-    else return true;  // When start == end, we're transferring ALL keys (leave case)
+    else return (target == start);
 }
 
 void
 PennSearch::HandleTransferKeys (Ipv4Address newOwner, uint32_t rangeStart, uint32_t rangeEnd)
 {
-    // FIX: When rangeStart == 0 (predecessor was GetAny()), transfer ALL keys
-    // This happens during leave when the leaving node has no predecessor
-    bool transferAll = (rangeStart == 0 && rangeEnd != 0);
-    
     for (auto it = m_invertedList.begin(); it != m_invertedList.end(); /* no increment */) {
         std::string keyword = it->first;
         uint32_t keyHash = PennKeyHelper::CreateShaKey(keyword);
-        
-        bool shouldTransfer = false;
-        if (transferAll) {
-            // Transfer all keys (this node is leaving and had no predecessor)
-            shouldTransfer = true;
-        } else if (rangeStart == rangeEnd) {
-            // Special case: rangeStart == rangeEnd means transfer ALL keys
-            // This can happen when the only other node is leaving
-            shouldTransfer = true;
-        } else {
-            // Normal case: transfer keys in the range (rangeStart, rangeEnd]
-            shouldTransfer = IsBetweenSemiOpen(keyHash, rangeStart, rangeEnd);
-        }
-        
-        if (shouldTransfer) {
+        if (IsBetweenSemiOpen(keyHash, rangeStart, rangeEnd)) {
             for (const auto& docId : it->second) {
-                SEARCH_LOG (GraderLogs::GetStoreLogStr (keyword, docId));
                 PennSearchMessage m (PennSearchMessage::STORE_REQ, GetNextTransactionId ());
                 m.SetStoreReq (keyword, docId);
                 Ptr<Packet> p = Create<Packet> ();
@@ -407,9 +386,7 @@ PennSearch::HandleTransferKeys (Ipv4Address newOwner, uint32_t rangeStart, uint3
                 m_socket->SendTo (p, 0, InetSocketAddress (newOwner, m_appPort));
             }
             m_invertedList.erase(it++);
-        } else {
-            ++it;
-        }
+        } else ++it;
     }
 }
 
@@ -441,6 +418,7 @@ void PennSearch::DistributedInvertedListMaintenanceStub () {}
 
 void PennSearch::ProcessPingReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
 {
+  // REMOVED LOGS
   PennSearchMessage resp = PennSearchMessage (PennSearchMessage::PING_RSP, message.GetTransactionId ());
   resp.SetPingRsp (message.GetPingReq ().pingMessage);
   Ptr<Packet> packet = Create<Packet> ();
