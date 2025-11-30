@@ -196,6 +196,7 @@ PennSearch::StartSearchFromOrigin (const std::vector<std::string> &terms, const 
 void
 PennSearch::SendPing (std::string nodeId, std::string pingMessage)
 {
+  // REMOVED LOGS
   Ipv4Address destAddress = ResolveNodeIpAddress (nodeId);
   m_chord->SendPing (destAddress, pingMessage);
 }
@@ -205,6 +206,7 @@ PennSearch::SendPennSearchPing (Ipv4Address destAddress, std::string pingMessage
 {
   if (destAddress != Ipv4Address::GetAny ()) {
       uint32_t transactionId = GetNextTransactionId ();
+      // REMOVED LOGS
       Ptr<PingRequest> pingRequest = Create<PingRequest> (transactionId, Simulator::Now (), destAddress, pingMessage);
       m_pingTracker.insert (std::make_pair (transactionId, pingRequest));
       Ptr<Packet> packet = Create<Packet> ();
@@ -241,6 +243,7 @@ void
 PennSearch::ProcessSearchReq (PennSearchMessage message, Ipv4Address source, uint16_t port)
 {
   auto req = message.GetSearchReq ();
+  // REMOVED CHATTY SEARCH LOG
   
   if (req.currentDocs == "__INIT__") {
       std::vector<std::string> terms;
@@ -371,14 +374,10 @@ static bool IsBetweenSemiOpen(uint32_t target, uint32_t start, uint32_t end)
 void
 PennSearch::HandleTransferKeys (Ipv4Address newOwner, uint32_t rangeStart, uint32_t rangeEnd)
 {
-    // FIX: "Transfer All" if rangeStart equals rangeEnd
-    bool transferAll = (rangeStart == rangeEnd);
-
     for (auto it = m_invertedList.begin(); it != m_invertedList.end(); /* no increment */) {
         std::string keyword = it->first;
         uint32_t keyHash = PennKeyHelper::CreateShaKey(keyword);
-        
-        if (transferAll || IsBetweenSemiOpen(keyHash, rangeStart, rangeEnd)) {
+        if (IsBetweenSemiOpen(keyHash, rangeStart, rangeEnd)) {
             for (const auto& docId : it->second) {
                 PennSearchMessage m (PennSearchMessage::STORE_REQ, GetNextTransactionId ());
                 m.SetStoreReq (keyword, docId);
@@ -419,6 +418,7 @@ void PennSearch::DistributedInvertedListMaintenanceStub () {}
 
 void PennSearch::ProcessPingReq (PennSearchMessage message, Ipv4Address sourceAddress, uint16_t sourcePort)
 {
+  // REMOVED LOGS
   PennSearchMessage resp = PennSearchMessage (PennSearchMessage::PING_RSP, message.GetTransactionId ());
   resp.SetPingRsp (message.GetPingReq ().pingMessage);
   Ptr<Packet> packet = Create<Packet> ();

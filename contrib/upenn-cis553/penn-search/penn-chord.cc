@@ -385,8 +385,9 @@ void
 PennChord::LeaveChord()
 {
   if (m_successor != Ipv4Address::GetAny() && m_successor != GetLocalAddress()) {
-      // FIX: Use 0,0 to signal Transfer All
-      TransferKeys(m_successor, 0, 0);
+      uint32_t predHash = (m_predecessor == Ipv4Address::GetAny()) ? 0 : PennKeyHelper::CreateShaKey(m_predecessor);
+      uint32_t myHash = PennKeyHelper::CreateShaKey(GetLocalAddress());
+      TransferKeys(m_successor, predHash, myHash);
       
       uint32_t txn1 = GetNextTransactionId();
       PennChordMessage notifyMsg(PennChordMessage::NOTIFY_MSG, txn1);
@@ -453,13 +454,6 @@ PennChord::ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddre
 void 
 PennChord::ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress) {
   Ipv4Address candidate = message.GetNotifyMsg().potentialPredessor;
-
-  // FIX: Handle Leave Explicitly First
-  if (sourceAddress == m_predecessor) {
-      m_predecessor = candidate;
-      return; 
-  }
-
   if (m_predecessor == Ipv4Address::GetAny() || IsBetween(candidate, m_predecessor, GetLocalAddress())) {
       Ipv4Address oldPred = m_predecessor;
       m_predecessor = candidate;
@@ -468,6 +462,9 @@ PennChord::ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress)
           uint32_t newPredHash = PennKeyHelper::CreateShaKey(m_predecessor);
           TransferKeys(m_predecessor, oldPredHash, newPredHash);
       }
+  }
+  if (sourceAddress == m_predecessor) {
+      m_predecessor = candidate;
   }
 }
 
@@ -571,6 +568,7 @@ PennChord::StartRingstate()
   }
   uint32_t txn = GetNextTransactionId();
   PennChordMessage msg(PennChordMessage::RINGSTATE_MSG, txn);
+  // Init hop count to 0
   msg.SetRingstateMsg(GetLocalAddress(), 0);
   Ptr<Packet> packet = Create<Packet>(); packet->AddHeader(msg);
   m_socket->SendTo(packet, 0, InetSocketAddress(m_successor, m_appPort));
