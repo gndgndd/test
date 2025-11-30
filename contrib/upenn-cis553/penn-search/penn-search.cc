@@ -374,10 +374,16 @@ static bool IsBetweenSemiOpen(uint32_t target, uint32_t start, uint32_t end)
 void
 PennSearch::HandleTransferKeys (Ipv4Address newOwner, uint32_t rangeStart, uint32_t rangeEnd)
 {
+    // FIX: If rangeStart == rangeEnd, it implies we are transferring EVERYTHING
+    // (We will modify LeaveChord to pass equal start/end to signal this)
+    bool transferAll = (rangeStart == rangeEnd); 
+
     for (auto it = m_invertedList.begin(); it != m_invertedList.end(); /* no increment */) {
         std::string keyword = it->first;
         uint32_t keyHash = PennKeyHelper::CreateShaKey(keyword);
-        if (IsBetweenSemiOpen(keyHash, rangeStart, rangeEnd)) {
+        
+        // FIX: Check transferAll flag first
+        if (transferAll || IsBetweenSemiOpen(keyHash, rangeStart, rangeEnd)) {
             for (const auto& docId : it->second) {
                 PennSearchMessage m (PennSearchMessage::STORE_REQ, GetNextTransactionId ());
                 m.SetStoreReq (keyword, docId);

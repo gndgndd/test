@@ -59,7 +59,7 @@ class PennChord : public PennApplication
     void ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress);
     
-    // Handle Set Successor Request (Immediate Patch)
+    // NEW: Handle Set Successor Request
     void ProcessSetSuccReq(PennChordMessage message, Ipv4Address sourceAddress);
     
     void HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress);
@@ -120,10 +120,6 @@ class PennChord : public PennApplication
 
     Ipv4Address m_successor;
     Ipv4Address m_predecessor;
-    
-    // FIX: Saved successor for Dying Bridge logic
-    Ipv4Address m_savedSuccessor;
-
     static std::set<Ipv4Address> s_joined;
 };
 
