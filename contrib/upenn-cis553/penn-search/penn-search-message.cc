@@ -614,4 +614,3 @@ PennSearchMessage::GetTransactionId (void) const
 {
   return m_transactionId;
 }
-
