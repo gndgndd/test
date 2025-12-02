@@ -59,7 +59,7 @@ class PennChord : public PennApplication
     void ProcessStabilizeRsp(PennChordMessage message, Ipv4Address sourceAddress);
     void ProcessNotifyMsg(PennChordMessage message, Ipv4Address sourceAddress);
     
-    // NEW: Handle Set Successor Request
+    // NEW: Handle Set Successor Request (Fix for Leave Logic)
     void ProcessSetSuccReq(PennChordMessage message, Ipv4Address sourceAddress);
     
     void HandleRingstate(PennChordMessage message, Ipv4Address sourceAddress);

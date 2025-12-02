@@ -138,6 +138,7 @@ PennSearch::ProcessCommand (std::vector<std::string> tokens)
       std::string dummyKeyword = (terms.empty () ? "" : terms[0]);
       uint32_t transactionId = GetNextTransactionId ();
       PennSearchMessage initReq (PennSearchMessage::SEARCH_REQ, transactionId);
+      // We pass __INIT__ as the 'currentDocs' to signal the start of a search flow
       initReq.SetSearchReq (originIp, allTerms, std::string ("__INIT__"), dummyKeyword);
       Ptr<Packet> p = Create<Packet> ();
       p->AddHeader (initReq);
@@ -178,6 +179,7 @@ PennSearch::StartSearch (const std::vector<std::string> &terms)
   StartSearchFromOrigin (terms, ss.str ());
 }
 
+// FIX 1: Use __INIT__ flag for fresh search context
 void
 PennSearch::StartSearchFromOrigin (const std::vector<std::string> &terms, const std::string &originIp)
 {
@@ -188,7 +190,8 @@ PennSearch::StartSearchFromOrigin (const std::vector<std::string> &terms, const 
       if (!remainingTerms.empty ()) remainingTerms += " ";
       remainingTerms += terms[i];
   }
-  std::string ctx = firstKeyword + "|" + "" + "|" + remainingTerms + "|" + originIp;
+  // Initialize with special flag instead of empty string to distinguish "empty result" from "start"
+  std::string ctx = firstKeyword + "|__INIT__|" + remainingTerms + "|" + originIp;
   uint32_t hash = PennKeyHelper::CreateShaKey (firstKeyword);
   m_chord->StartSearchLookup (ctx, hash);
 }
@@ -243,7 +246,6 @@ void
 PennSearch::ProcessSearchReq (PennSearchMessage message, Ipv4Address source, uint16_t port)
 {
   auto req = message.GetSearchReq ();
-  // REMOVED CHATTY SEARCH LOG
   
   if (req.currentDocs == "__INIT__") {
       std::vector<std::string> terms;
@@ -283,7 +285,8 @@ void
 PennSearch::ContinueSearch (const std::string &keyword, const std::string &currentDocs,
                             const std::string &remainingTerms, const std::string &originIp)
 {
-  if (currentDocs == "" && remainingTerms != "") {
+  // If we have no more results and no terms left, just return empty
+  if (currentDocs == "" && remainingTerms == "") {
       PennSearchMessage rsp (PennSearchMessage::SEARCH_RSP, GetNextTransactionId ());
       rsp.SetSearchRsp (originIp, ""); 
       Ptr<Packet> p = Create<Packet> ();
@@ -292,6 +295,8 @@ PennSearch::ContinueSearch (const std::string &keyword, const std::string &curre
       m_socket->SendTo (p, 0, InetSocketAddress (dest, m_appPort));
       return;
   }
+
+  // If no more terms, we are done
   if (remainingTerms == "") {
       PennSearchMessage rsp (PennSearchMessage::SEARCH_RSP, GetNextTransactionId ());
       rsp.SetSearchRsp (originIp, currentDocs);
@@ -301,6 +306,7 @@ PennSearch::ContinueSearch (const std::string &keyword, const std::string &curre
       m_socket->SendTo (p, 0, InetSocketAddress (dest, m_appPort));
       return;
   }
+  
   std::string nextKeyword;
   std::string nextRemaining;
   std::stringstream ss (remainingTerms);
@@ -406,9 +412,11 @@ std::string PennSearch::IntersectDocLists (const std::string &a, const std::stri
   return SetToString (R);
 }
 
+// FIX 1: Strict Handling of Empty/Init States
 std::string PennSearch::CombineSearchResults (const std::string &existing, const std::string &next)
 {
-  if (existing == "") return next;
+  if (existing == "__INIT__") return next;
+  if (existing == "") return ""; // If we already failed to find anything, propagation is stopped.
   return IntersectDocLists (existing, next);
 }
 

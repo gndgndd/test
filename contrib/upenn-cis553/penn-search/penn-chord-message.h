@@ -28,6 +28,7 @@ class PennChordMessage : public Header
       STABILIZE_REQ = 7,
       STABILIZE_RSP = 8,
       NOTIFY_MSG = 9,
+      // NEW: Explicit message to set successor (for Leave logic)
       SET_SUCC_REQ = 10 
     };
 
@@ -100,7 +101,8 @@ class PennChordMessage : public Header
         void Serialize (Buffer::Iterator &start) const;
         uint32_t Deserialize (Buffer::Iterator &start);
         Ipv4Address initiatorNode;
-        uint16_t hopCount; // FIX: Added Hop Count to prevent infinite loops
+        // FIX: Added Hop Count to prevent infinite loops
+        uint16_t hopCount; 
     };
 
     struct StabilizeReq {
@@ -127,6 +129,7 @@ class PennChordMessage : public Header
         Ipv4Address potentialPredessor;
     };
 
+    // NEW STRUCT for SET_SUCC_REQ
     struct SetSuccReq {
         void Print (std::ostream &os) const;
         uint32_t GetSerializedSize () const;
@@ -162,7 +165,7 @@ class PennChordMessage : public Header
     LookupRsp GetLookupRsp ();
     void SetLookupRsp (uint32_t key, Ipv4Address owner);
     
-    // Updated Accessor
+    // Updated Accessor for Ringstate
     RingstateMsg GetRingstateMsg();
     void SetRingstateMsg(Ipv4Address initiator, uint16_t hops);
     
@@ -172,6 +175,8 @@ class PennChordMessage : public Header
     void SetStabilizeRsp (Ipv4Address predessor);
     NotifyMsg GetNotifyMsg();
     void SetNotifyMsg (Ipv4Address potPredessor);
+    
+    // Updated Accessor for SetSucc
     SetSuccReq GetSetSuccReq();
     void SetSetSuccReq(Ipv4Address newSucc);
 };
